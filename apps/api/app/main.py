@@ -25,14 +25,17 @@ from apps.api.app.config import Settings, get_settings
 from apps.api.app.core.database import utc_iso, utc_now
 from apps.api.app.core.state import AppContainer
 from apps.api.app.core.url_policy import DnsResolver
-from apps.api.app.modules.event_intelligence.orchestrator import EventIntelligenceServiceProtocol
+from apps.api.app.modules.event_intelligence.orchestrator import (
+    _AUTO_LOAD,
+    EventIntelligenceServiceProtocol,
+)
 from simulation.seed_network import seed_network_if_needed
 
 
 def create_app(
     *,
     settings: Settings | None = None,
-    event_intelligence_service: EventIntelligenceServiceProtocol | None = None,
+    event_intelligence_service: EventIntelligenceServiceProtocol | None | object = _AUTO_LOAD,
     dns_resolver: DnsResolver | None = None,
 ) -> FastAPI:
     """Create and configure the NeuralGrid FastAPI control plane."""

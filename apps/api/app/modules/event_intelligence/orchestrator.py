@@ -99,6 +99,9 @@ def _parse_optional_int(val: Any) -> int | None:
         return None
 
 
+_AUTO_LOAD = object()
+
+
 class EventIntelligenceOrchestrator:
     """Junaid-owned orchestration, URL safety enforcement, persistence, and twin hand-off."""
 
@@ -110,7 +113,7 @@ class EventIntelligenceOrchestrator:
         event_repo: EventRepository,
         audit: AuditLogger,
         ws_manager: ConnectionManager,
-        service: EventIntelligenceServiceProtocol | None = None,
+        service: EventIntelligenceServiceProtocol | None | object = _AUTO_LOAD,
         dns_resolver: DnsResolver | None = None,
     ) -> None:
         self.settings = settings
@@ -122,11 +125,11 @@ class EventIntelligenceOrchestrator:
         self._dns_resolver = dns_resolver
 
     def get_service(self) -> EventIntelligenceServiceProtocol | None:
-        if self._injected_service is not None:
-            return self._injected_service
-        return load_tanish_service()
+        if self._injected_service is _AUTO_LOAD:
+            return load_tanish_service()
+        return self._injected_service  # type: ignore[return-value]
 
-    def set_service(self, service: EventIntelligenceServiceProtocol | None) -> None:
+    def set_service(self, service: EventIntelligenceServiceProtocol | None | object) -> None:
         self._injected_service = service
 
     async def run_discovery(self, request: EventDiscoveryRequest) -> EventDiscoveryResponse:

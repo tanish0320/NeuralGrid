@@ -28,6 +28,11 @@ logs/
 node_modules/
 apps/web/dist/
 
+# Documentation Pack archives
+NeuralGrid_48_Hour_Documentation_Pack_v1.5.zip
+NeuralGrid_48_Hour_Documentation_Pack_v1.5/
+NeuralGrid_Complete_Project_Summary.docx
+
 # Model binaries
 *.bin
 *.pkl

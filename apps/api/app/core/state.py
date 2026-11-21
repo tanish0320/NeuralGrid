@@ -11,6 +11,7 @@ from apps.api.app.core.url_policy import DnsResolver
 from apps.api.app.modules.digital_twin.engine import SimulationManager
 from apps.api.app.modules.digital_twin.forecast_risk import PredictionService
 from apps.api.app.modules.event_intelligence.orchestrator import (
+    _AUTO_LOAD,
     EventIntelligenceOrchestrator,
     EventIntelligenceServiceProtocol,
 )
@@ -33,7 +34,7 @@ class AppContainer:
         self,
         *,
         settings: Settings,
-        event_intelligence_service: EventIntelligenceServiceProtocol | None = None,
+        event_intelligence_service: EventIntelligenceServiceProtocol | None | object = _AUTO_LOAD,
         dns_resolver: DnsResolver | None = None,
     ) -> None:
         self.settings = settings

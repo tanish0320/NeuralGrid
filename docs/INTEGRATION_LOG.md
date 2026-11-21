@@ -37,3 +37,48 @@
   - Local Python 3.13 environment lacks `ortools` and `psutil` (`psutil` is listed in `requirements-backend.txt` / `requirements-node-agent.txt` for target `.venv`); deterministic greedy constrained planner and native Windows `ctypes` / POSIX host telemetry fallbacks run cleanly without them.
   - Physical two-laptop Wi-Fi hotspot test awaits Tanish's laptop joining the same Private Wi-Fi/hotspot and configuring `TWINNODE_CONTROLLER_URL`.
 - Other developer reviewed: pending Tanish integration review
+
+
+## 2026-11-21 17:15 UTC — Tanish Frontend (apps/web), EventSense Pipeline, ML Training & Full Integration (v1.5)
+- Owner: Tanish
+- Files created:
+  - EventSense Service & Ingestion Pipeline:
+    - `apps/api/app/modules/event_intelligence/providers/gdelt_doc_provider.py` (Bounded GDELT DOC 2.0 query via HTTPX)
+    - `apps/api/app/modules/event_intelligence/providers/rss_provider.py` (RSS/Atom metadata parsing via Feedparser)
+    - `apps/api/app/modules/event_intelligence/providers/crawl4ai_provider.py` (Permitted public-page extraction with HTTPX fallback)
+    - `apps/api/app/modules/event_intelligence/extraction/schema_org_extractor.py` (JSON-LD Schema.org Event extractor)
+    - `apps/api/app/modules/event_intelligence/extraction/page_text_extractor.py` (Heading & pattern fallback)
+    - `apps/api/app/modules/event_intelligence/normalization/event_normalizer.py` (UTC datetime normalization)
+    - `apps/api/app/modules/event_intelligence/normalization/deduplication.py` (Canonical URL deduplication)
+    - `apps/api/app/modules/event_intelligence/service.py` (Canonical EventIntelligenceService facade)
+  - ML Forecasting & Research:
+    - `ml/traffic/feature_contract.py` (Feature vectors & target definitions)
+    - `ml/traffic/generate_training_data.py` (Synthetic time-series telemetry generator)
+    - `ml/traffic/train_traffic.py` (XGBoost training with chronological split vs persistence)
+    - `ml/traffic/adapter.py` (Implements ForecastProviderProtocol)
+    - `ml/reports/experiment_results.md` (Experiment results: 78.9% MAE error reduction vs persistence)
+    - `docs/research/dataset_provenance.md` (Provenance & DoNext radio QoS context)
+    - `docs/research/prediction_definitions.md` (Metrics, units, and labeling standards)
+  - Frontend Operations Console (`apps/web/`):
+    - `package.json`, `vite.config.ts`, `tsconfig.json`, `tailwind.config.js`, `postcss.config.js`, `index.html`
+    - `src/types/api.ts` (Canonical TypeScript types matching backend DTOs)
+    - `src/services/api.ts` (REST client)
+    - `src/services/websocket.ts` (Live WebSocket hook with auto-reconnect)
+    - `src/components/common/Badge.tsx` (Strict epistemic data badges: [SYNTHETIC], [PUBLIC SOURCE], etc.)
+    - `src/components/layout/Shell.tsx` (Navigation rail, status bar, demo reset)
+    - `src/pages/CommandCentre.tsx` (KPI strip, 100-cell grid, active event, risk table)
+    - `src/pages/EventSense.tsx` (Provider chips, event profile, evidence drawer, crawl/confirm/impact)
+    - `src/pages/NetworkTwin.tsx` (Cytoscape.js 100-cell topology graph, detail drawer, 5-min scrubber)
+    - `src/pages/PredictionOrchestration.tsx` (Forecast curves, risk drivers, optimizer, approval governance)
+    - `src/pages/TwinNodeLab.tsx` (Side-by-side NODE-TANISH / NODE-JUNAID, host telemetry vs cellular load, dispatch)
+    - `src/pages/Verification.tsx` (Side-by-side counterfactual metrics: baseline vs intervention, TwinNode compute)
+    - `src/pages/GovernanceAudit.tsx` (Immutable audit trail ledger with search & payload inspector)
+    - `infra/scripts/start-web.ps1` (Convenience script to launch Vite dev server)
+  - Tests:
+    - `tests/test_tanish_eventsense.py` (ES-01, ES-03, Schema.org, page text, service facade, ML integration)
+- Tests executed:
+  1. `python -m pytest -v` -> **38/38 PASSED in 11.17s** (all 9 original test modules + Tanish EventSense & ML tests)
+  2. `npm run build --prefix apps/web` -> **Built in 5.64s with 0 errors** (TypeScript & Vite bundling verified)
+- Acceptance Gates verified:
+  - G0 (Imports), G1 (Health), G2 (Network), G3 (Discovery), G4 (Crawl), G5 (Event), G6 (Impact), G7 (Forecast/plan), G8 (Approval), G9 (TwinNode), G10 (Verification) — ALL PASSING.
+- Integration status: **COMPLETE & SEAMLESSLY INTEGRATED**.
