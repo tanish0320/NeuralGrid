@@ -1,0 +1,35 @@
+# Environments & secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases & runtime logs
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Frontend / node (owned by Tanish)
+node_modules/
+apps/web/dist/
+
+# Model binaries
+*.bin
+*.pkl
+*.xgb
+*.joblib

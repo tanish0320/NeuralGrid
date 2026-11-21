@@ -1,0 +1,10 @@
+[project]
+name = "neuralgrid-backend"
+version = "1.5.0"
+description = "NeuralGrid 48-hour backend, 100-cell digital twin, EventSense API/orchestrator, planner/governance, and TwinNode"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
