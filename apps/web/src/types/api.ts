@@ -437,3 +437,114 @@ export interface RealtimeScanResponse {
   load_distribution: LoadDistributionVector[];
   justification: SurgeJustification;
 }
+
+export interface EventCellImpactRecord {
+  impact_id: string;
+  event_id: string;
+  cell_id: string;
+  geographic_distance_km: number;
+  geographic_relevance_score: number;
+  coverage_relevance_score: number;
+  estimated_demand_delta_mbps: number;
+  impact_confidence: number;
+  impact_category: 'PRIMARY_HOTSPOT' | 'SECONDARY_ADJACENT' | 'PERIPHERAL_TRANSIT';
+  impact_window_start: string;
+  impact_window_end: string;
+  temporal_profile: {
+    arrival_hours: number;
+    event_hours: number;
+    departure_hours: number;
+    peak_multiplier: number;
+    effective_attendance: number;
+    attendance_estimated: boolean;
+    sample_points: Array<{
+      timestamp: string;
+      offset_minutes: number;
+      surge_factor: number;
+      demand_mbps: number;
+    }>;
+  };
+  mapping_method: string;
+  scoring_model_version: string;
+  input_evidence_ids: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EventImpactSummary {
+  event_id: string;
+  event_title: string;
+  event_category: string;
+  venue_name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  lifecycle_status: string;
+  verification_status: string;
+  attendance_estimate: number | null;
+  is_geographically_resolved: boolean;
+  total_affected_cells: number;
+  total_demand_delta_mbps: number;
+  impact_window_start: string | null;
+  impact_window_end: string | null;
+  affected_cells: EventCellImpactRecord[];
+}
+
+export interface ContributingEventInfo {
+  event_id: string;
+  event_title: string;
+  event_category: string;
+  venue_name: string | null;
+  distance_km: number;
+  demand_delta_mbps: number;
+  impact_category: string;
+  impact_confidence: number;
+  impact_window_start: string;
+  impact_window_end: string;
+}
+
+export interface CellImpactAggregated {
+  cell_id: string;
+  region: string;
+  capacity_mbps: number;
+  base_load_mbps: number;
+  current_load_mbps: number;
+  combined_demand_delta_mbps: number;
+  projected_total_demand_mbps: number;
+  projected_utilisation_pct: number;
+  congestion_risk_band: 'NORMAL' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
+  contributing_event_count: number;
+  contributing_events: ContributingEventInfo[];
+  max_impact_window_start: string | null;
+  max_impact_window_end: string | null;
+}
+
+export interface CellOverlapSummary {
+  cell_id: string;
+  region: string;
+  overlapping_event_count: number;
+  event_ids: string[];
+  event_titles: string[];
+  individual_demand_sum_mbps: number;
+  sublinear_aggregated_demand_mbps: number;
+  attenuation_discount_mbps: number;
+  peak_overlap_window_start: string | null;
+  peak_overlap_window_end: string | null;
+  risk_band: 'NORMAL' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
+}
+
+export interface ImpactRecalculateResponse {
+  status: string;
+  network_id: string | null;
+  total_canonical_events: number;
+  mapped_events_count: number;
+  geographically_unresolved_count: number;
+  excluded_events_count: number;
+  total_impact_records: number;
+  affected_cells_count: number;
+  overlapping_cells_count: number;
+  max_cell_demand_delta_mbps: number;
+  avg_cell_demand_delta_mbps: number;
+  category_distribution: Record<string, number>;
+  timestamp: string;
+}
+

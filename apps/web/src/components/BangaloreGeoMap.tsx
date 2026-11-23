@@ -12,7 +12,14 @@ import {
   Zap,
 } from 'lucide-react';
 import { Badge } from './common/Badge';
-import { CellRecord, LoadDistributionVector, MitigatingTower, SurgeTower } from '../types/api';
+import {
+  CellImpactAggregated,
+  CellOverlapSummary,
+  CellRecord,
+  LoadDistributionVector,
+  MitigatingTower,
+  SurgeTower,
+} from '../types/api';
 
 interface BangaloreGeoMapProps {
   cells: CellRecord[];
@@ -20,6 +27,8 @@ interface BangaloreGeoMapProps {
   mitigatingTowers: MitigatingTower[];
   loadVectors: LoadDistributionVector[];
   venueLocation?: { lat: number; lon: number; name: string } | null;
+  cellImpacts?: CellImpactAggregated[];
+  cellOverlaps?: CellOverlapSummary[];
   selectedCellId: string | null;
   onSelectCell: (cellId: string) => void;
   className?: string;
@@ -31,6 +40,8 @@ export const BangaloreGeoMap: React.FC<BangaloreGeoMapProps> = ({
   mitigatingTowers,
   loadVectors,
   venueLocation,
+  cellImpacts = [],
+  cellOverlaps = [],
   selectedCellId,
   onSelectCell,
   className = '',
@@ -102,6 +113,8 @@ export const BangaloreGeoMap: React.FC<BangaloreGeoMapProps> = ({
 
     const mitigatingIds = new Set(mitigatingTowers.map((m) => m.cell_id));
     const mitigatingMap = new Map(mitigatingTowers.map((m) => [m.cell_id, m]));
+    const impactMap = new Map(cellImpacts.map((i) => [i.cell_id, i]));
+    const overlapMap = new Map(cellOverlaps.map((o) => [o.cell_id, o]));
 
     // 1. Plot Venue Marker & Influence Footprint (if available)
     if (venueLocation && venueLocation.lat && venueLocation.lon) {
@@ -190,6 +203,22 @@ export const BangaloreGeoMap: React.FC<BangaloreGeoMapProps> = ({
             </div>
           </div>
         `;
+      } else if (impactMap.has(c.cell_id) && (impactMap.get(c.cell_id)?.combined_demand_delta_mbps ?? 0) > 0) {
+        // Cell experiencing Phase 5 Event Impact
+        const imp = impactMap.get(c.cell_id)!;
+        const ov = overlapMap.get(c.cell_id);
+        const isCrit = imp.congestion_risk_band === 'CRITICAL';
+        const isHi = imp.congestion_risk_band === 'HIGH';
+        const color = isCrit ? '#EF4444' : isHi ? '#F59E0B' : '#06B6D4';
+        const borderColor = isSelected ? '#FFFFFF' : color;
+        markerHtml = `
+          <div style="position: relative; display: flex; flex-direction: column; align-items: center; cursor: pointer;">
+            <div style="background: ${color}; border: 1.5px solid ${borderColor}; width: 14px; height: 14px; border-radius: 50%; box-shadow: 0 0 10px ${color}80; z-index: 5;"></div>
+            <div style="background: #0B132B; border: 1px solid ${color}; padding: 1px 4px; border-radius: 3px; font-size: 8px; font-family: monospace; font-weight: bold; color: ${color}; margin-top: 2px; white-space: nowrap;">
+              ${c.cell_id} +${imp.combined_demand_delta_mbps.toFixed(0)}M${ov ? ` [${ov.overlapping_event_count}E]` : ''}
+            </div>
+          </div>
+        `;
       } else {
         // Normal Cell Tower
         const color = c.initial_state === 'STANDBY' ? '#A855F7' : c.is_emergency ? '#F59E0B' : '#10B981';
@@ -203,8 +232,8 @@ export const BangaloreGeoMap: React.FC<BangaloreGeoMapProps> = ({
       const icon = L.divIcon({
         className: 'custom-tower-marker',
         html: markerHtml,
-        iconSize: isSurge ? [140, 50] : isMitigating ? [130, 45] : [16, 16],
-        iconAnchor: isSurge ? [70, 11] : isMitigating ? [65, 9] : [8, 8],
+        iconSize: isSurge ? [140, 50] : isMitigating ? [130, 45] : impactMap.has(c.cell_id) && (impactMap.get(c.cell_id)?.combined_demand_delta_mbps ?? 0) > 0 ? [100, 35] : [16, 16],
+        iconAnchor: isSurge ? [70, 11] : isMitigating ? [65, 9] : impactMap.has(c.cell_id) && (impactMap.get(c.cell_id)?.combined_demand_delta_mbps ?? 0) > 0 ? [50, 7] : [8, 8],
       });
 
       const marker = L.marker([lat, lon], { icon }).addTo(markersLayer);

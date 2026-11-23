@@ -399,10 +399,34 @@ CREATE TABLE IF NOT EXISTS event_history (
     FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS event_cell_impacts (
+    impact_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    cell_id TEXT NOT NULL,
+    geographic_distance_km REAL NOT NULL,
+    geographic_relevance_score REAL NOT NULL,
+    coverage_relevance_score REAL NOT NULL,
+    estimated_demand_delta_mbps REAL NOT NULL,
+    impact_confidence REAL NOT NULL,
+    impact_category TEXT NOT NULL,
+    impact_window_start TEXT NOT NULL,
+    impact_window_end TEXT NOT NULL,
+    temporal_profile_json TEXT NOT NULL DEFAULT '{}',
+    mapping_method TEXT NOT NULL,
+    scoring_model_version TEXT NOT NULL DEFAULT 'v1.5',
+    input_evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(event_id, cell_id),
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_telemetry_run_tick ON telemetry(run_id, tick);
 CREATE INDEX IF NOT EXISTS idx_sources_run ON event_sources(discovery_run_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_event ON event_evidence(event_id);
 CREATE INDEX IF NOT EXISTS idx_event_history_event ON event_history(event_id);
+CREATE INDEX IF NOT EXISTS idx_impacts_event ON event_cell_impacts(event_id);
+CREATE INDEX IF NOT EXISTS idx_impacts_cell ON event_cell_impacts(cell_id);
 CREATE INDEX IF NOT EXISTS idx_registry_platform ON event_source_registry(platform);
 CREATE INDEX IF NOT EXISTS idx_forecasts_run ON forecasts(run_id, state_version);
 CREATE INDEX IF NOT EXISTS idx_plans_run ON plans(run_id);

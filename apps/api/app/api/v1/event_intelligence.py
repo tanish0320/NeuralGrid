@@ -29,6 +29,14 @@ from apps.api.app.schemas.events import (
     SourceRegistryItem,
     SourceRegistryUpdate,
 )
+from apps.api.app.schemas.impact import (
+    CellImpactAggregated,
+    CellOverlapSummary,
+    EventCellImpactRecord,
+    EventImpactSummary,
+    ImpactRecalculateRequest,
+    ImpactRecalculateResponse,
+)
 
 router = APIRouter(prefix="/event-intelligence", tags=["event-intelligence"])
 
@@ -416,4 +424,172 @@ async def get_event_history(
     container: AppContainer = Depends(get_container),
 ) -> list[EventHistoryRecord]:
     return container.event_repo.list_history_for_event(event_id)
+
+
+# =========================================================================
+# Phase 5: Geospatial Event-to-Cell Impact Mapping Endpoints
+# =========================================================================
+
+
+@router.post("/impact/recalculate", response_model=ImpactRecalculateResponse)
+async def recalculate_impacts(
+    request: ImpactRecalculateRequest = ImpactRecalculateRequest(),
+    container: AppContainer = Depends(get_container),
+) -> ImpactRecalculateResponse:
+    """Trigger on-demand recalculation of geospatial event-to-cell impacts across all canonical events."""
+    return container.impact_engine.recalculate_all(network_id=request.network_id)
+
+
+@router.get("/impact/events", response_model=list[EventImpactSummary])
+async def list_event_impacts(
+    category: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    container: AppContainer = Depends(get_container),
+) -> list[EventImpactSummary]:
+    """Retrieve impact summaries for all canonical events."""
+    events = container.event_repo.list_events()
+    summaries: list[EventImpactSummary] = []
+
+    for ev in events:
+        if category and ev.event_type.upper() != category.upper():
+            continue
+        if status and ev.status.upper() != status.upper():
+            continue
+
+        impacts = container.impact_repo.get_impacts_for_event(ev.event_id)
+        is_geo = ev.latitude is not None and ev.longitude is not None
+        total_delta = round(sum(i.estimated_demand_delta_mbps for i in impacts), 2)
+        win_start = impacts[0].impact_window_start if impacts else None
+        win_end = impacts[0].impact_window_end if impacts else None
+
+        attendance = ev.attendance_high or ev.attendance_low
+
+        summaries.append(
+            EventImpactSummary(
+                event_id=ev.event_id,
+                event_title=ev.name,
+                event_category=ev.event_type,
+                venue_name=ev.venue_name,
+                latitude=ev.latitude,
+                longitude=ev.longitude,
+                lifecycle_status=ev.status,
+                verification_status=ev.verification_status,
+                attendance_estimate=attendance,
+                is_geographically_resolved=is_geo,
+                total_affected_cells=len(impacts),
+                total_demand_delta_mbps=total_delta,
+                impact_window_start=win_start,
+                impact_window_end=win_end,
+                affected_cells=impacts,
+            )
+        )
+
+    return summaries
+
+
+@router.get("/impact/events/{event_id}", response_model=EventImpactSummary)
+async def get_event_impact_detail(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> EventImpactSummary:
+    """Retrieve full geospatial impact details for a specific canonical event."""
+    ev = container.event_repo.get_event(event_id)
+    if ev is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
+
+    impacts = container.impact_repo.get_impacts_for_event(event_id)
+    is_geo = ev.latitude is not None and ev.longitude is not None
+    total_delta = round(sum(i.estimated_demand_delta_mbps for i in impacts), 2)
+    win_start = impacts[0].impact_window_start if impacts else None
+    win_end = impacts[0].impact_window_end if impacts else None
+    attendance = ev.attendance_high or ev.attendance_low
+
+    return EventImpactSummary(
+        event_id=ev.event_id,
+        event_title=ev.name,
+        event_category=ev.event_type,
+        venue_name=ev.venue_name,
+        latitude=ev.latitude,
+        longitude=ev.longitude,
+        lifecycle_status=ev.status,
+        verification_status=ev.verification_status,
+        attendance_estimate=attendance,
+        is_geographically_resolved=is_geo,
+        total_affected_cells=len(impacts),
+        total_demand_delta_mbps=total_delta,
+        impact_window_start=win_start,
+        impact_window_end=win_end,
+        affected_cells=impacts,
+    )
+
+
+@router.get("/impact/cells", response_model=list[CellImpactAggregated])
+async def list_cell_impacts(
+    region: str | None = Query(default=None),
+    risk_band: str | None = Query(default=None),
+    only_affected: bool = Query(default=False),
+    container: AppContainer = Depends(get_container),
+) -> list[CellImpactAggregated]:
+    """Retrieve cell-centric aggregated event impact across the network."""
+    net = container.network_repo.get_current_network()
+    if not net:
+        return []
+
+    cells = container.network_repo.get_cells(net.network_id)
+    events = {e.event_id: e for e in container.event_repo.list_events()}
+    results: list[CellImpactAggregated] = []
+
+    for cell in cells:
+        if region and cell.region.lower() != region.lower():
+            continue
+
+        impacts = container.impact_repo.get_impacts_for_cell(cell.cell_id)
+        if only_affected and not impacts:
+            continue
+
+        agg = container.impact_engine.aggregate_cell_impacts(cell, impacts, events)
+        if risk_band and agg.congestion_risk_band.upper() != risk_band.upper():
+            continue
+
+        results.append(agg)
+
+    results.sort(key=lambda x: (x.combined_demand_delta_mbps, x.projected_utilisation_pct), reverse=True)
+    return results
+
+
+@router.get("/impact/cells/{cell_id}", response_model=CellImpactAggregated)
+async def get_cell_impact_detail(
+    cell_id: str,
+    container: AppContainer = Depends(get_container),
+) -> CellImpactAggregated:
+    """Retrieve all contributing canonical events and aggregated surge demand for a single cell."""
+    net = container.network_repo.get_current_network()
+    if not net:
+        raise HTTPException(status_code=404, detail="No active network found")
+
+    cells = container.network_repo.get_cells(net.network_id)
+    target_cell = next((c for c in cells if c.cell_id == cell_id), None)
+    if not target_cell:
+        raise HTTPException(status_code=404, detail=f"Cell {cell_id} not found in network {net.network_id}")
+
+    impacts = container.impact_repo.get_impacts_for_cell(cell_id)
+    events = {e.event_id: e for e in container.event_repo.list_events()}
+    return container.impact_engine.aggregate_cell_impacts(target_cell, impacts, events)
+
+
+@router.get("/impact/overlaps", response_model=list[CellOverlapSummary])
+async def list_cell_overlaps(
+    container: AppContainer = Depends(get_container),
+) -> list[CellOverlapSummary]:
+    """Detect and list all cells experiencing simultaneous multi-event overlapping demand."""
+    net = container.network_repo.get_current_network()
+    if not net:
+        return []
+
+    cells = container.network_repo.get_cells(net.network_id)
+    impacts = container.impact_repo.list_all_impacts()
+    events = {e.event_id: e for e in container.event_repo.list_events()}
+
+    return container.impact_engine.detect_overlapping_cells(cells, impacts, events)
+
 

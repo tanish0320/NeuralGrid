@@ -14,6 +14,10 @@ import {
   SimulationStateResponse,
   TaskRecord,
   VerificationResponse,
+  EventImpactSummary,
+  CellImpactAggregated,
+  CellOverlapSummary,
+  ImpactRecalculateResponse,
 } from '../types/api';
 
 const BASE_URL = '';
@@ -386,4 +390,32 @@ export const api = {
       }),
     }),
   getAuditLogs: (limit = 100) => fetchJson<AuditRecord[]>(`/api/v1/audit?limit=${limit}`),
+
+  // Geospatial Event-to-Cell Impact Assessment (Phase 5)
+  getImpactEvents: (params?: { category?: string; status?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.category) q.set('category', params.category);
+    if (params?.status) q.set('status', params.status);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<EventImpactSummary[]>(`/api/v1/event-intelligence/impact/events${qs}`);
+  },
+  getEventImpactDetail: (eventId: string) =>
+    fetchJson<EventImpactSummary>(`/api/v1/event-intelligence/impact/events/${eventId}`),
+  getCellImpacts: (params?: { region?: string; risk_band?: string; only_affected?: boolean }) => {
+    const q = new URLSearchParams();
+    if (params?.region) q.set('region', params.region);
+    if (params?.risk_band) q.set('risk_band', params.risk_band);
+    if (params?.only_affected) q.set('only_affected', 'true');
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<CellImpactAggregated[]>(`/api/v1/event-intelligence/impact/cells${qs}`);
+  },
+  getCellImpactDetail: (cellId: string) =>
+    fetchJson<CellImpactAggregated>(`/api/v1/event-intelligence/impact/cells/${cellId}`),
+  getImpactOverlaps: () =>
+    fetchJson<CellOverlapSummary[]>('/api/v1/event-intelligence/impact/overlaps'),
+  recalculateImpacts: (networkId?: string) =>
+    fetchJson<ImpactRecalculateResponse>('/api/v1/event-intelligence/impact/recalculate', {
+      method: 'POST',
+      body: JSON.stringify({ network_id: networkId }),
+    }),
 };

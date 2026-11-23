@@ -26,8 +26,10 @@ from apps.api.app.repositories.simulations import SimulationRepository
 from apps.api.app.repositories.source_registry import SourceRegistryRepository
 from apps.api.app.repositories.twinnode import TwinNodeRepository
 from apps.api.app.repositories.verification import VerificationRepository
+from apps.api.app.repositories.impact import ImpactRepository
 from apps.api.app.modules.event_intelligence.connectors.registry import ConnectorRegistry
 from apps.api.app.modules.event_intelligence.resolution.resolver import CanonicalEventResolver
+from apps.api.app.modules.event_intelligence.geospatial.engine import GeospatialImpactEngine
 
 
 class AppContainer:
@@ -56,8 +58,15 @@ class AppContainer:
         self.twinnode_repo = TwinNodeRepository(self.db)
         self.verification_repo = VerificationRepository(self.db)
         self.registry_repo = SourceRegistryRepository(self.db)
+        self.impact_repo = ImpactRepository(self.db)
         self.connector_registry = ConnectorRegistry(settings)
         self.canonical_resolver = CanonicalEventResolver(self.event_repo, self.registry_repo)
+        self.impact_engine = GeospatialImpactEngine(
+            event_repo=self.event_repo,
+            network_repo=self.network_repo,
+            impact_repo=self.impact_repo,
+            registry_repo=self.registry_repo,
+        )
 
         self.event_orchestrator = EventIntelligenceOrchestrator(
             settings=settings,

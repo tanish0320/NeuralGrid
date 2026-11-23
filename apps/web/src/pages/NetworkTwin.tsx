@@ -17,14 +17,19 @@ import {
   SkipForward,
   Wrench,
   Zap,
+  RefreshCw,
+  Activity,
 } from 'lucide-react';
 import { Badge } from '../components/common/Badge';
 import { BangaloreGeoMap } from '../components/BangaloreGeoMap';
 import { api } from '../services/api';
 import {
+  CellImpactAggregated,
+  CellOverlapSummary,
   CellRecord,
   CellTelemetryRecord,
   GraphResponse,
+  ImpactRecalculateResponse,
   LoadDistributionVector,
   MitigatingTower,
   SimulationStateResponse,
@@ -60,6 +65,46 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   const [surgeTower, setSurgeTower] = useState<SurgeTower | null>(null);
   const [mitigatingTowers, setMitigatingTowers] = useState<MitigatingTower[]>([]);
   const [loadVectors, setLoadVectors] = useState<LoadDistributionVector[]>([]);
+
+  // Phase 5: Geospatial Impact Assessment state
+  const [cellImpacts, setCellImpacts] = useState<CellImpactAggregated[]>([]);
+  const [cellOverlaps, setCellOverlaps] = useState<CellOverlapSummary[]>([]);
+  const [selectedCellImpact, setSelectedCellImpact] = useState<CellImpactAggregated | null>(null);
+  const [isRecalculating, setIsRecalculating] = useState<boolean>(false);
+  const [recalcSummary, setRecalcSummary] = useState<ImpactRecalculateResponse | null>(null);
+
+  const loadImpactData = () => {
+    api.getCellImpacts().then(setCellImpacts).catch(() => {});
+    api.getImpactOverlaps().then(setCellOverlaps).catch(() => {});
+  };
+
+  useEffect(() => {
+    loadImpactData();
+  }, []);
+
+  useEffect(() => {
+    if (selectedCellId) {
+      api.getCellImpactDetail(selectedCellId).then(setSelectedCellImpact).catch(() => setSelectedCellImpact(null));
+    } else {
+      setSelectedCellImpact(null);
+    }
+  }, [selectedCellId]);
+
+  const handleRecalculateImpacts = async () => {
+    setIsRecalculating(true);
+    try {
+      const res = await api.recalculateImpacts();
+      setRecalcSummary(res);
+      loadImpactData();
+      if (selectedCellId) {
+        api.getCellImpactDetail(selectedCellId).then(setSelectedCellImpact).catch(() => {});
+      }
+    } catch (err) {
+      console.error('Impact recalculation failed:', err);
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
 
   useEffect(() => {
     api
@@ -344,6 +389,16 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
           )}
 
           <button
+            onClick={handleRecalculateImpacts}
+            disabled={isRecalculating}
+            className="px-2.5 py-1 bg-noc-card hover:bg-noc-hover border border-noc-border rounded text-[11px] font-mono text-noc-cyan flex items-center gap-1 disabled:opacity-50"
+            title="Recalculate multi-source canonical event impacts across 100-cell network"
+          >
+            <RefreshCw className={`w-3 h-3 ${isRecalculating ? 'animate-spin' : ''}`} />
+            <span>{isRecalculating ? 'Recalculating...' : 'Recalc Impacts'}</span>
+          </button>
+
+          <button
             onClick={() => setShowFaultModal(true)}
             className="px-2.5 py-1 bg-red-950/70 hover:bg-red-900 border border-red-700/60 rounded text-[11px] font-mono text-red-300 flex items-center gap-1"
           >
@@ -352,6 +407,15 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
           </button>
         </div>
       </div>
+
+      {recalcSummary && (
+        <div className="bg-noc-card/90 border border-noc-cyan/40 px-3 py-1.5 rounded flex items-center justify-between text-[11px] font-mono text-noc-cyan">
+          <span>
+            Impact Recalculation Complete: {recalcSummary.mapped_events_count} events mapped across {recalcSummary.affected_cells_count} cells ({recalcSummary.overlapping_cells_count} overlapping concurrency zones). Max Surge: {recalcSummary.max_cell_demand_delta_mbps} Mbps.
+          </span>
+          <button onClick={() => setRecalcSummary(null)} className="text-slate-400 hover:text-slate-200">✕</button>
+        </div>
+      )}
 
       {/* Main Graph Viewport + Selected Cell Drawer */}
       <div className="flex-1 grid grid-cols-12 gap-3 min-h-0">
@@ -363,6 +427,8 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
               surgeTower={surgeTower}
               mitigatingTowers={mitigatingTowers}
               loadVectors={loadVectors}
+              cellImpacts={cellImpacts}
+              cellOverlaps={cellOverlaps}
               venueLocation={
                 surgeTower
                   ? {
@@ -477,6 +543,75 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* Phase 5: Geospatial Impact Assessment */}
+              {selectedCellImpact && selectedCellImpact.contributing_event_count > 0 && (
+                <div className="bg-noc-card/90 border border-noc-cyan/40 p-3 rounded space-y-2.5">
+                  <div className="flex items-center justify-between pb-2 border-b border-noc-border">
+                    <span className="text-[11px] font-mono font-bold text-noc-cyan flex items-center gap-1.5">
+                      <Activity className="w-3.5 h-3.5" />
+                      EVENT IMPACT ASSESSMENT
+                    </span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
+                        selectedCellImpact.congestion_risk_band === 'CRITICAL'
+                          ? 'bg-red-950 text-red-300 border border-red-700'
+                          : selectedCellImpact.congestion_risk_band === 'HIGH'
+                          ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                          : selectedCellImpact.congestion_risk_band === 'ELEVATED'
+                          ? 'bg-yellow-950 text-yellow-300 border border-yellow-700'
+                          : 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                      }`}
+                    >
+                      {selectedCellImpact.congestion_risk_band} RISK
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                    <div>
+                      <span className="text-slate-500 block text-[9px]">PREDICTED SURGE:</span>
+                      <span className="text-noc-cyan font-bold">+{selectedCellImpact.combined_demand_delta_mbps.toFixed(1)} Mbps</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[9px]">PROJECTED UTIL:</span>
+                      <span className="text-slate-200 font-bold">{selectedCellImpact.projected_utilisation_pct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+
+                  {selectedCellImpact.contributing_event_count > 1 && (
+                    <div className="p-2 bg-amber-950/40 border border-amber-700/50 rounded text-[10px] font-mono text-amber-300">
+                      <span className="font-bold">Multi-Event Overlap Detected:</span> {selectedCellImpact.contributing_event_count} simultaneous events affecting cell. Sub-linear device saturation applied.
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] font-mono text-slate-400 block font-semibold">
+                      CONTRIBUTING EVENTS ({selectedCellImpact.contributing_events.length}):
+                    </span>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {selectedCellImpact.contributing_events.map((ev, idx) => (
+                        <div key={idx} className="p-2 bg-noc-bg/80 border border-noc-border rounded text-[10px] font-mono space-y-1">
+                          <div className="flex justify-between items-start">
+                            <span className="text-slate-200 font-bold truncate max-w-[170px]" title={ev.event_title}>
+                              {ev.event_title}
+                            </span>
+                            <span className="text-noc-cyan font-semibold">+{ev.demand_delta_mbps.toFixed(1)}M</span>
+                          </div>
+                          <div className="flex justify-between text-slate-400 text-[9px]">
+                            <span>{ev.event_category} • {ev.distance_km.toFixed(2)} km</span>
+                            <span className="text-slate-500">Conf: {(ev.impact_confidence * 100).toFixed(0)}%</span>
+                          </div>
+                          {ev.venue_name && (
+                            <div className="text-[9px] text-slate-400 truncate">
+                              Venue: {ev.venue_name}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Invariant Truth Notice */}
               <div className="p-2.5 bg-noc-bg/60 border border-noc-border rounded text-[10px] font-mono text-slate-400">
