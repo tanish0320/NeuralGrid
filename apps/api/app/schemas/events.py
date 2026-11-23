@@ -5,7 +5,7 @@ from typing import Any, Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
-DiscoveryProvider = Literal["gdelt", "rss", "manual"]
+DiscoveryProvider = str
 FetchProvider = Literal["crawl4ai", "static_html_fallback"]
 DiscoveryRunStatus = Literal["PENDING", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED", "SKIPPED"]
 ProviderStatus = Literal["SUCCEEDED", "PARTIAL", "FAILED", "SKIPPED"]
@@ -36,10 +36,12 @@ SourceType = Literal[
     "event_page",
     "organiser_page",
     "ticketing_page",
+    "social_post",
     "manual_reference",
 ]
 EventLifecycleStatus = Literal["CANDIDATE", "CONFIRMED", "REJECTED"]
 AttendanceScenario = Literal["LOW", "EXPECTED", "HIGH"]
+RegistryHealthStatus = Literal["HEALTHY", "DEGRADED", "UNAVAILABLE", "AWAITING_CREDENTIALS", "DISABLED"]
 
 
 def _ensure_utc_datetime(value: datetime | None) -> datetime | None:
@@ -61,10 +63,10 @@ class EventDiscoveryRequest(ContractModel):
     query_terms: list[str] = Field(min_length=1, max_length=8)
     time_window_hours: int = Field(default=168, ge=1, le=168)
     max_candidates: int = Field(default=5, ge=1, le=10)
-    enabled_providers: list[Literal["gdelt", "rss"]] = Field(
+    enabled_providers: list[str] = Field(
         default_factory=lambda: ["gdelt", "rss"],
         min_length=1,
-        max_length=2,
+        max_length=20,
     )
 
     @field_validator("query_terms")
@@ -77,7 +79,7 @@ class EventDiscoveryRequest(ContractModel):
 
 
 class SourceCandidate(ContractModel):
-    discovery_provider: Literal["gdelt", "rss"]
+    discovery_provider: str
     source_type: str = Field(min_length=1, max_length=64)
     url: HttpUrl
     canonical_url: HttpUrl
@@ -96,7 +98,7 @@ class SourceCandidate(ContractModel):
 class ProviderCandidateResult(ContractModel):
     """Internal output from Tanish's provider adapters; items are not the public API response."""
 
-    provider: Literal["gdelt", "rss"]
+    provider: str
     status: ProviderStatus
     items: list[SourceCandidate] = Field(default_factory=list)
     error_code: str | None = Field(default=None, max_length=64)
@@ -112,7 +114,7 @@ class EventDiscoveryServiceResult(ContractModel):
 class ProviderRunSummary(ContractModel):
     """Public provider summary returned by FastAPI after Junaid persists candidates."""
 
-    provider: Literal["gdelt", "rss"]
+    provider: str
     status: ProviderStatus
     candidate_count: int = Field(default=0, ge=0)
     error_code: str | None = Field(default=None, max_length=64)
@@ -335,4 +337,50 @@ class RealtimeScanResponse(ContractModel):
     mitigating_towers: list[dict[str, Any]] = Field(default_factory=list)
     load_distribution: list[dict[str, Any]] = Field(default_factory=list)
     justification: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceRegistryItem(ContractModel):
+    source_id: str
+    platform: str
+    display_name: str
+    base_url: str
+    connector_type: str
+    enabled: bool
+    access_method: str
+    refresh_interval_sec: int
+    geographic_scope: str = "Bengaluru"
+    supported_categories: list[str] = Field(default_factory=list)
+    last_collected_at: datetime | None = None
+    last_error: str | None = None
+    health_status: RegistryHealthStatus = "HEALTHY"
+    created_at: datetime
+    updated_at: datetime
+
+
+class SourceRegistryUpdate(ContractModel):
+    enabled: bool | None = None
+    refresh_interval_sec: int | None = Field(default=None, ge=60, le=86400)
+
+
+class SourceHealthResult(ContractModel):
+    source_id: str
+    connector_type: str
+    health_status: RegistryHealthStatus
+    message: str
+    last_check_at: datetime
+    latency_ms: float | None = None
+
+
+class EventEvidenceRecord(ContractModel):
+    evidence_id: str
+    event_id: UUID
+    source_platform: str
+    source_url: str
+    source_timestamp: datetime | None = None
+    evidence_type: str
+    extracted_text: str
+    source_reliability: float = 0.8
+    evidence_confidence: float = 0.8
+    raw_metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
 

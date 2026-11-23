@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from apps.api.app.config import Settings
+from apps.api.app.modules.event_intelligence.connectors.registry import ConnectorRegistry
 from apps.api.app.modules.event_intelligence.extraction.page_text_extractor import extract_page_text_fallback
 from apps.api.app.modules.event_intelligence.extraction.schema_org_extractor import extract_schema_org_event
 from apps.api.app.modules.event_intelligence.normalization.deduplication import deduplicate_source_candidates
@@ -32,17 +33,31 @@ class EventIntelligenceService:
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
+        self.registry = ConnectorRegistry(self.settings)
 
     async def discover_candidates(
         self, request: EventDiscoveryRequest
     ) -> EventDiscoveryServiceResult:
-        """Call enabled GDELT DOC / RSS adapters and return structured ProviderCandidateResult for each."""
+        """Runs multi-source discovery across configured connectors (GDELT, RSS, Ticketing, Social)."""
         provider_results: list[ProviderCandidateResult] = []
         warnings: list[str] = []
 
-        # 1. GDELT DOC 2.0 Discovery
-        if "gdelt" in request.enabled_providers:
-            if self.settings.eventsense_enable_gdelt and self.settings.gdelt_enabled:
+        # Run discovery through the central connector registry
+        registry_results = await self.registry.run_discovery(
+            city=request.city,
+            query_terms=request.query_terms,
+            max_records=request.max_candidates,
+            target_source_ids=request.enabled_providers,
+        )
+
+        for res in registry_results:
+            if res.items:
+                res.items = deduplicate_source_candidates(res.items)
+            provider_results.append(res)
+
+        # Fallback GDELT / RSS if request specifically requested legacy providers and registry had none
+        if not provider_results and ("gdelt" in request.enabled_providers or "rss" in request.enabled_providers):
+            if "gdelt" in request.enabled_providers and self.settings.eventsense_enable_gdelt:
                 gdelt_res = await query_gdelt_doc(
                     city=request.city,
                     query_terms=request.query_terms,
@@ -52,52 +67,6 @@ class EventIntelligenceService:
                 if gdelt_res.items:
                     gdelt_res.items = deduplicate_source_candidates(gdelt_res.items)
                 provider_results.append(gdelt_res)
-            else:
-                provider_results.append(
-                    ProviderCandidateResult(
-                        provider="gdelt",
-                        status="SKIPPED",
-                        items=[],
-                        error_code="PROVIDER_DISABLED",
-                        error_message="GDELT discovery is disabled in settings.",
-                    )
-                )
-
-        # 2. RSS/Atom Feeds Discovery
-        if "rss" in request.enabled_providers:
-            if self.settings.eventsense_enable_rss:
-                feed_urls_str = self.settings.eventsense_rss_feeds.strip()
-                feed_urls = [u.strip() for u in feed_urls_str.split(",") if u.strip()]
-                if not feed_urls:
-                    # If no feeds configured in env, return clean SKIPPED or empty
-                    provider_results.append(
-                        ProviderCandidateResult(
-                            provider="rss",
-                            status="SKIPPED",
-                            items=[],
-                            error_code="NO_FEEDS_CONFIGURED",
-                            error_message="No RSS feed URLs configured in EVENTSENSE_RSS_FEEDS.",
-                        )
-                    )
-                else:
-                    rss_res = parse_rss_feeds(
-                        feed_urls=feed_urls,
-                        query_terms=request.query_terms,
-                        max_records=request.max_candidates,
-                    )
-                    if rss_res.items:
-                        rss_res.items = deduplicate_source_candidates(rss_res.items)
-                    provider_results.append(rss_res)
-            else:
-                provider_results.append(
-                    ProviderCandidateResult(
-                        provider="rss",
-                        status="SKIPPED",
-                        items=[],
-                        error_code="PROVIDER_DISABLED",
-                        error_message="RSS discovery is disabled in settings.",
-                    )
-                )
 
         return EventDiscoveryServiceResult(
             providers=provider_results,
@@ -169,6 +138,7 @@ class EventIntelligenceService:
 
 # Global default instance and top-level module functions for backward/forward compatibility
 _default_service = EventIntelligenceService()
+registry = _default_service.registry
 
 
 async def discover_candidates(request: EventDiscoveryRequest) -> EventDiscoveryServiceResult:

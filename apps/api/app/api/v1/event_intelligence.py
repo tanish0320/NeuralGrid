@@ -18,10 +18,14 @@ from apps.api.app.schemas.events import (
     DiscoveryRunDetailResponse,
     EventDiscoveryRequest,
     EventDiscoveryResponse,
+    EventEvidenceRecord,
     EventRecord,
     EventSourceRecord,
     RealtimeScanRequest,
     RealtimeScanResponse,
+    SourceHealthResult,
+    SourceRegistryItem,
+    SourceRegistryUpdate,
 )
 
 router = APIRouter(prefix="/event-intelligence", tags=["event-intelligence"])
@@ -321,3 +325,61 @@ async def list_event_sources(
     container: AppContainer = Depends(get_container),
 ) -> list[EventSourceRecord]:
     return container.source_repo.list_sources(run_id=run_id, event_id=event_id)
+
+
+@router.get("/sources/registry", response_model=list[SourceRegistryItem])
+async def list_source_registry(
+    platform: str | None = Query(default=None),
+    enabled_only: bool = Query(default=False),
+    container: AppContainer = Depends(get_container),
+) -> list[SourceRegistryItem]:
+    """List all registered Bengaluru event source connectors and their health status."""
+    return container.registry_repo.list_sources(platform=platform, enabled_only=enabled_only)
+
+
+@router.patch("/sources/registry/{source_id}", response_model=SourceRegistryItem)
+async def update_source_registry(
+    source_id: str,
+    update: SourceRegistryUpdate,
+    container: AppContainer = Depends(get_container),
+) -> SourceRegistryItem:
+    """Enable, disable, or adjust refresh interval for a registered connector."""
+    item = container.registry_repo.update_source(source_id, update)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Source {source_id} not found in registry")
+    return item
+
+
+@router.post("/sources/registry/{source_id}/test", response_model=SourceHealthResult)
+async def test_connector_health(
+    source_id: str,
+    container: AppContainer = Depends(get_container),
+) -> SourceHealthResult:
+    """Trigger an on-demand connectivity and credential health check on a connector."""
+    registry = getattr(container, "connector_registry", None)
+    if not registry:
+        service = container.event_orchestrator.get_service()
+        registry = getattr(service, "registry", None)
+
+    connector = registry.get(source_id) if registry else None
+
+    if not connector:
+        raise HTTPException(status_code=404, detail=f"Connector {source_id} not registered")
+
+    health = await connector.check_health()
+    container.registry_repo.record_run_result(
+        source_id,
+        health_status=health.health_status,
+        error_message=health.message if health.health_status != "HEALTHY" else None,
+    )
+    return health
+
+
+@router.get("/events/{event_id}/evidence", response_model=list[EventEvidenceRecord])
+async def get_event_evidence(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> list[EventEvidenceRecord]:
+    """Retrieve all supporting multi-source evidence and verification records for an event."""
+    return container.registry_repo.list_evidence_for_event(event_id)
+

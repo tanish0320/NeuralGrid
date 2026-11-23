@@ -23,8 +23,10 @@ from apps.api.app.repositories.networks import NetworkRepository
 from apps.api.app.repositories.plans import PlanRepository
 from apps.api.app.repositories.predictions import PredictionRepository
 from apps.api.app.repositories.simulations import SimulationRepository
+from apps.api.app.repositories.source_registry import SourceRegistryRepository
 from apps.api.app.repositories.twinnode import TwinNodeRepository
 from apps.api.app.repositories.verification import VerificationRepository
+from apps.api.app.modules.event_intelligence.connectors.registry import ConnectorRegistry
 
 
 class AppContainer:
@@ -52,6 +54,8 @@ class AppContainer:
         self.plan_repo = PlanRepository(self.db)
         self.twinnode_repo = TwinNodeRepository(self.db)
         self.verification_repo = VerificationRepository(self.db)
+        self.registry_repo = SourceRegistryRepository(self.db)
+        self.connector_registry = ConnectorRegistry(settings)
 
         self.event_orchestrator = EventIntelligenceOrchestrator(
             settings=settings,

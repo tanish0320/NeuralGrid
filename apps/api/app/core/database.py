@@ -355,8 +355,43 @@ CREATE TABLE IF NOT EXISTS audit_events (
     details_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS event_source_registry (
+    source_id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    connector_type TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    access_method TEXT NOT NULL,
+    refresh_interval_sec INTEGER NOT NULL DEFAULT 3600,
+    geographic_scope TEXT NOT NULL DEFAULT 'Bengaluru',
+    supported_categories_json TEXT NOT NULL DEFAULT '["CONCERT","SPORTS","FESTIVAL","EXHIBITION","TECH_CONFERENCE"]',
+    last_collected_at TEXT,
+    last_error TEXT,
+    health_status TEXT NOT NULL DEFAULT 'HEALTHY',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_evidence (
+    evidence_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    source_platform TEXT NOT NULL,
+    source_url TEXT NOT NULL,
+    source_timestamp TEXT,
+    evidence_type TEXT NOT NULL,
+    extracted_text TEXT NOT NULL,
+    source_reliability REAL NOT NULL DEFAULT 0.8,
+    evidence_confidence REAL NOT NULL DEFAULT 0.8,
+    raw_metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_telemetry_run_tick ON telemetry(run_id, tick);
 CREATE INDEX IF NOT EXISTS idx_sources_run ON event_sources(discovery_run_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_event ON event_evidence(event_id);
+CREATE INDEX IF NOT EXISTS idx_registry_platform ON event_source_registry(platform);
 CREATE INDEX IF NOT EXISTS idx_forecasts_run ON forecasts(run_id, state_version);
 CREATE INDEX IF NOT EXISTS idx_plans_run ON plans(run_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_node_status ON tasks(assigned_node_id, status);
