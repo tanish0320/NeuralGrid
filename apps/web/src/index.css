@@ -23,3 +23,53 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #3B4D70;
 }
+
+/* Leaflet NOC custom marker animations */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.radar-ring {
+  position: absolute;
+  top: -12px;
+  left: -12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid #EF4444;
+  animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+  pointer-events: none;
+}
+
+.donor-glow {
+  box-shadow: 0 0 14px 4px rgba(6, 182, 212, 0.6);
+}
+
+/* Google Maps Dark Mode NOC filter */
+.gmaps-dark-tiles .leaflet-tile-pane {
+  filter: brightness(0.65) invert(1) contrast(1.25) hue-rotate(200deg) saturate(0.35);
+}
+
+.gmaps-satellite-tiles .leaflet-tile-pane {
+  filter: contrast(1.1) brightness(0.9);
+}
+
+.leaflet-popup-content-wrapper {
+  background: #0E1526 !important;
+  color: #F1F5F9 !important;
+  border: 1px solid #1E293B !important;
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.7) !important;
+  font-family: ui-monospace, monospace;
+}
+
+.leaflet-popup-tip {
+  background: #0E1526 !important;
+}

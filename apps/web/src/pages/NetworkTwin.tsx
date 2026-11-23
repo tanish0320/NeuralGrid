@@ -5,8 +5,10 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Compass,
   Filter,
   Layers,
+  MapPin,
   Maximize2,
   Minimize2,
   Pause,
@@ -17,8 +19,17 @@ import {
   Zap,
 } from 'lucide-react';
 import { Badge } from '../components/common/Badge';
+import { BangaloreGeoMap } from '../components/BangaloreGeoMap';
 import { api } from '../services/api';
-import { CellRecord, CellTelemetryRecord, GraphResponse, SimulationStateResponse } from '../types/api';
+import {
+  CellRecord,
+  CellTelemetryRecord,
+  GraphResponse,
+  LoadDistributionVector,
+  MitigatingTower,
+  SimulationStateResponse,
+  SurgeTower,
+} from '../types/api';
 
 interface NetworkTwinProps {
   cells: CellRecord[];
@@ -45,6 +56,23 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   const [isStepping, setIsStepping] = useState<boolean>(false);
   const [faultCellId, setFaultCellId] = useState<string>('CELL-BLR-018');
   const [showFaultModal, setShowFaultModal] = useState<boolean>(false);
+  const [viewFormat, setViewFormat] = useState<'GEOMAP' | 'CYTOSCAPE'>('GEOMAP');
+  const [surgeTower, setSurgeTower] = useState<SurgeTower | null>(null);
+  const [mitigatingTowers, setMitigatingTowers] = useState<MitigatingTower[]>([]);
+  const [loadVectors, setLoadVectors] = useState<LoadDistributionVector[]>([]);
+
+  useEffect(() => {
+    api
+      .realtimeScan('Bengaluru', false, simState?.simulation_id)
+      .then((res) => {
+        if (res.surge_tower) {
+          setSurgeTower(res.surge_tower);
+          setMitigatingTowers(res.mitigating_towers);
+          setLoadVectors(res.load_distribution);
+        }
+      })
+      .catch(() => {});
+  }, [simState?.simulation_id]);
 
   const selectedCell = cells.find((c) => c.cell_id === selectedCellId);
   const selectedTelemetry = simState?.telemetry.find((t) => t.cell_id === selectedCellId);
@@ -57,17 +85,19 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
 
     // Nodes
     graphData.nodes.forEach((n, idx) => {
+      const id = n.id || n.cell_id || `CELL-${idx}`;
+      const label = n.label || id.replace('CELL-BLR-', '#');
       // Deterministic synthetic coordinate layout
       const col = idx % 10;
       const row = Math.floor(idx / 10);
       elements.push({
         group: 'nodes',
         data: {
-          id: n.id,
-          label: n.id.replace('CELL-BLR-', '#'),
+          id,
+          label,
           region: n.region,
           criticality: n.criticality,
-          capacity: n.capacity,
+          capacity: n.capacity || n.capacity_mbps || 500,
         },
         position: {
           x: 100 + col * 90 + (row % 2 ? 45 : 0),
@@ -77,16 +107,22 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
     });
 
     // Edges
-    graphData.edges.forEach((e) => {
-      elements.push({
-        group: 'edges',
-        data: {
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          type: e.type,
-        },
-      });
+    graphData.edges.forEach((e, idx) => {
+      const id = e.id || e.edge_id || `EDGE-${idx}`;
+      const source = e.source || e.source_cell_id;
+      const target = e.target || e.target_cell_id;
+      const type = e.type || e.edge_type || 'PRIMARY_NEIGHBOR';
+      if (source && target) {
+        elements.push({
+          group: 'edges',
+          data: {
+            id,
+            source,
+            target,
+            type,
+          },
+        });
+      }
     });
 
     const cy = cytoscape({
@@ -183,8 +219,9 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
     if (!cyRef.current || !simState) return;
     const cy = cyRef.current;
 
+    const telList = simState.telemetry || [];
     const telMap = new Map<string, CellTelemetryRecord>(
-      simState.telemetry.map((t) => [t.cell_id, t])
+      telList.map((t) => [t.cell_id, t])
     );
 
     cy.batch(() => {
@@ -257,7 +294,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
       <div className="bg-noc-surface border border-noc-border rounded-lg px-4 py-2.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Layers className="w-4 h-4 text-noc-cyan" />
-          <span className="text-xs font-semibold text-slate-200">100-Cell Network Topology Graph</span>
+          <span className="text-xs font-semibold text-slate-200">100-Cell Network Digital Twin</span>
           <Badge type="SYNTHETIC" />
           <div className="h-4 w-px bg-noc-border" />
           <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
@@ -266,13 +303,42 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => cyRef.current?.fit(undefined, 30)}
-            className="px-2.5 py-1 bg-noc-card hover:bg-noc-hover border border-noc-border rounded text-[11px] font-mono text-slate-300 flex items-center gap-1"
-          >
-            <Maximize2 className="w-3 h-3" />
-            <span>Fit View</span>
-          </button>
+          {/* View Format Selector */}
+          <div className="flex bg-noc-bg rounded p-0.5 border border-noc-border font-mono text-xs">
+            <button
+              onClick={() => setViewFormat('GEOMAP')}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1 transition-colors ${
+                viewFormat === 'GEOMAP'
+                  ? 'bg-noc-cyan text-noc-bg'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Compass className="w-3 h-3" />
+              <span>Bangalore NOC Map</span>
+            </button>
+            <button
+              onClick={() => setViewFormat('CYTOSCAPE')}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center gap-1 transition-colors ${
+                viewFormat === 'CYTOSCAPE'
+                  ? 'bg-noc-cyan text-noc-bg'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Layers className="w-3 h-3" />
+              <span>Cytoscape Graph</span>
+            </button>
+          </div>
+
+          {viewFormat === 'CYTOSCAPE' && (
+            <button
+              onClick={() => cyRef.current?.fit(undefined, 30)}
+              className="px-2.5 py-1 bg-noc-card hover:bg-noc-hover border border-noc-border rounded text-[11px] font-mono text-slate-300 flex items-center gap-1"
+            >
+              <Maximize2 className="w-3 h-3" />
+              <span>Fit View</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowFaultModal(true)}
             className="px-2.5 py-1 bg-red-950/70 hover:bg-red-900 border border-red-700/60 rounded text-[11px] font-mono text-red-300 flex items-center gap-1"
@@ -285,12 +351,35 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
 
       {/* Main Graph Viewport + Selected Cell Drawer */}
       <div className="flex-1 grid grid-cols-12 gap-3 min-h-0">
-        {/* Cytoscape Container */}
-        <div className="col-span-8 bg-[#070A10] border border-noc-border rounded-lg relative overflow-hidden">
-          <div ref={containerRef} className="w-full h-full" />
-          <div className="absolute bottom-3 left-3 bg-noc-card/90 border border-noc-border px-3 py-1.5 rounded text-[10px] font-mono text-slate-400 pointer-events-none">
-            Click any cell node to inspect telemetry, queueing, and neighbours.
-          </div>
+        {/* Viewport: Geo Map or Cytoscape Container */}
+        <div className="col-span-8 bg-[#070A10] border border-noc-border rounded-lg relative overflow-hidden flex flex-col">
+          {viewFormat === 'GEOMAP' ? (
+            <BangaloreGeoMap
+              cells={cells}
+              surgeTower={surgeTower}
+              mitigatingTowers={mitigatingTowers}
+              loadVectors={loadVectors}
+              venueLocation={
+                surgeTower
+                  ? {
+                      lat: surgeTower.lat,
+                      lon: surgeTower.lon,
+                      name: surgeTower.locality || 'Bengaluru Event Venue',
+                    }
+                  : null
+              }
+              selectedCellId={selectedCellId}
+              onSelectCell={onSelectCell}
+              className="h-full border-0 rounded-none"
+            />
+          ) : (
+            <>
+              <div ref={containerRef} className="w-full h-full" />
+              <div className="absolute bottom-3 left-3 bg-noc-card/90 border border-noc-border px-3 py-1.5 rounded text-[10px] font-mono text-slate-400 pointer-events-none">
+                Click any cell node to inspect telemetry, queueing, and neighbours.
+              </div>
+            </>
+          )}
         </div>
 
         {/* Selected Cell Detail Drawer */}
@@ -326,7 +415,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                 <div>
                   <span className="text-slate-500 text-[10px] block">CURRENT DEMAND:</span>
                   <span className="text-slate-100 font-bold">
-                    {selectedTelemetry?.demand_mbps.toFixed(1) || 0} Mbps
+                    {(selectedTelemetry?.demand_mbps ?? 0).toFixed(1)} Mbps
                   </span>
                 </div>
                 <div>
@@ -340,13 +429,13 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                         : 'text-emerald-400'
                     }`}
                   >
-                    {selectedTelemetry?.utilisation_pct.toFixed(1) || 0}%
+                    {(selectedTelemetry?.utilisation_pct ?? 0).toFixed(1)}%
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-500 text-[10px] block">SERVED TRAFFIC:</span>
                   <span className="text-emerald-400">
-                    {selectedTelemetry?.served_mbps.toFixed(1) || 0} Mbps
+                    {(selectedTelemetry?.served_mbps ?? 0).toFixed(1)} Mbps
                   </span>
                 </div>
                 <div>
@@ -358,7 +447,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                         : 'text-slate-400'
                     }
                   >
-                    {selectedTelemetry?.queued_mbps.toFixed(1) || 0} Mbps
+                    {(selectedTelemetry?.queued_mbps ?? 0).toFixed(1)} Mbps
                   </span>
                 </div>
               </div>
@@ -368,13 +457,13 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                 <div className="flex justify-between">
                   <span className="text-slate-400">Simulated Latency:</span>
                   <span className="text-slate-200 font-bold">
-                    {selectedTelemetry?.simulated_latency_ms.toFixed(1) || selectedCell.base_latency_ms} ms
+                    {(selectedTelemetry?.simulated_latency_ms ?? (selectedCell as any)?.base_latency_ms ?? 15.0).toFixed(1)} ms
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Unserved Drop:</span>
                   <span className="text-red-400 font-bold">
-                    {selectedTelemetry?.unserved_mbps.toFixed(1) || 0} Mbps
+                    {(selectedTelemetry?.unserved_mbps ?? 0).toFixed(1)} Mbps
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -388,7 +477,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
               {/* Invariant Truth Notice */}
               <div className="p-2.5 bg-noc-bg/60 border border-noc-border rounded text-[10px] font-mono text-slate-400">
                 <span className="text-noc-cyan font-bold">Mass Balance Invariant:</span>{' '}
-                demand ({selectedTelemetry?.demand_mbps.toFixed(0)}M) = served ({selectedTelemetry?.served_mbps.toFixed(0)}M) + queued ({selectedTelemetry?.queued_mbps.toFixed(0)}M) + unserved ({selectedTelemetry?.unserved_mbps.toFixed(0)}M)
+                demand ({(selectedTelemetry?.demand_mbps ?? 0).toFixed(0)}M) = served ({(selectedTelemetry?.served_mbps ?? 0).toFixed(0)}M) + queued ({(selectedTelemetry?.queued_mbps ?? 0).toFixed(0)}M) + unserved ({(selectedTelemetry?.unserved_mbps ?? 0).toFixed(0)}M)
               </div>
             </div>
           ) : (
@@ -398,7 +487,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
           )}
 
           <div className="pt-3 border-t border-noc-border text-[10px] font-mono text-slate-500">
-            Coordinates: {selectedCell?.latitude.toFixed(4)}° N, {selectedCell?.longitude.toFixed(4)}° E
+            Coordinates: {selectedCell ? `${(selectedCell.latitude ?? selectedCell.lat ?? 12.9716).toFixed(4)}° N, ${(selectedCell.longitude ?? selectedCell.lon ?? 77.5946).toFixed(4)}° E` : '—'}
           </div>
         </div>
       </div>

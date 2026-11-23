@@ -39,8 +39,22 @@ def parse_rss_feeds(
         if not url_str:
             continue
         try:
-            feed = feedparser.parse(url_str)
-            if feed.bozo and not feed.entries:
+            try:
+                import httpx
+                resp = httpx.get(
+                    url_str,
+                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
+                    timeout=6.0,
+                    follow_redirects=True,
+                )
+                if resp.status_code == 200:
+                    feed = feedparser.parse(resp.text)
+                else:
+                    feed = feedparser.parse(url_str)
+            except Exception:
+                feed = feedparser.parse(url_str)
+
+            if not feed.entries and feed.bozo:
                 bozo_msg = str(getattr(feed, "bozo_exception", "Unknown parse failure"))
                 errors.append(f"{url_str}: {bozo_msg}")
                 continue
@@ -58,10 +72,12 @@ def parse_rss_feeds(
                 title = (getattr(entry, "title", "") or "").strip() or None
                 summary = (getattr(entry, "summary", "") or "").strip() or None
 
-                # Optional keyword filter if query_terms provided
+                # Keyword match against query_terms or common event indicators
                 if clean_terms:
                     text_blob = f"{title or ''} {summary or ''}".lower()
-                    if not any(qt in text_blob for qt in clean_terms):
+                    event_keywords = {"event", "concert", "festival", "match", "stadium", "live", "tour", "show", "expo", "summit", "gathering", "crowd", "marathon", "celebration", "jatre", "bengaluru", "bangalore"}
+                    combined_terms = set(clean_terms).union(event_keywords)
+                    if not any(qt in text_blob for qt in combined_terms):
                         continue
 
                 published_at = _struct_time_to_utc(

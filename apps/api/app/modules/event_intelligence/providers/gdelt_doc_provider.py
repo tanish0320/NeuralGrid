@@ -31,7 +31,7 @@ async def query_gdelt_doc(
     city: str,
     query_terms: list[str],
     max_records: int = 5,
-    timeout_seconds: float = 8.0,
+    timeout_seconds: float = 3.5,
 ) -> ProviderCandidateResult:
     """Bounded GDELT DOC 2.0 article search adapter."""
     cleaned_city = city.strip()

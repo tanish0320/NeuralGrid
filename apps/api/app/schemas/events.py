@@ -317,3 +317,22 @@ class EventImpactResponse(ContractModel):
     total_estimated_uplift_mbps: float
     assumptions: dict[str, Any]
     created_at: datetime
+
+
+class RealtimeScanRequest(ContractModel):
+    city: str = Field(default="Bengaluru")
+    query_terms: list[str] = Field(default_factory=lambda: ["concert", "festival", "stadium", "match", "Bengaluru"])
+    auto_confirm: bool = Field(default=True)
+    simulation_id: UUID | None = Field(default=None)
+
+
+class RealtimeScanResponse(ContractModel):
+    status: str
+    discovered_sources_count: int
+    events: list[EventRecord]
+    selected_event: EventRecord | None = None
+    surge_tower: dict[str, Any] | None = None
+    mitigating_towers: list[dict[str, Any]] = Field(default_factory=list)
+    load_distribution: list[dict[str, Any]] = Field(default_factory=list)
+    justification: dict[str, Any] = Field(default_factory=dict)
+

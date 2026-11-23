@@ -22,9 +22,14 @@ export interface CellRecord {
   region: string;
   latitude: number;
   longitude: number;
+  lat?: number;
+  lon?: number;
   capacity_mbps: number;
+  backhaul_capacity_mbps?: number;
+  base_load_mbps?: number;
   criticality: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   is_emergency_priority: boolean;
+  is_emergency?: boolean;
   base_latency_ms: number;
   initial_state: CellOperationalState;
   current_state: CellOperationalState;
@@ -35,10 +40,15 @@ export interface CellEdgeRecord {
   network_id: string;
   source_cell_id: string;
   target_cell_id: string;
-  edge_type: 'PRIMARY_NEIGHBOR' | 'BACKHAUL_CLUSTER' | 'OVERLAY';
-  distance_km: number;
+  edge_type: string;
+  distance_km?: number;
   weight: number;
+  max_transfer_mbps?: number;
   enabled: boolean;
+  id?: string;
+  source?: string;
+  target?: string;
+  type?: string;
 }
 
 export interface NetworkResponse {
@@ -49,10 +59,37 @@ export interface NetworkResponse {
   cells: CellRecord[];
 }
 
+export interface GraphNode {
+  id: string;
+  label: string;
+  region: string;
+  criticality: string;
+  capacity: number;
+  cell_id?: string;
+  capacity_mbps?: number;
+  lat?: number;
+  lon?: number;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  distance?: number;
+  edge_id?: string;
+  source_cell_id?: string;
+  target_cell_id?: string;
+  edge_type?: string;
+  weight?: number;
+}
+
 export interface GraphResponse {
   network_id: string;
-  nodes: { id: string; label: string; region: string; criticality: string; capacity: number }[];
-  edges: { id: string; source: string; target: string; type: string; distance: number }[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
   average_degree: number;
 }
 
@@ -238,21 +275,29 @@ export interface PlanRecord {
 export interface NodeRecord {
   node_id: string;
   hostname: string;
-  ip_address: string;
-  port: number;
-  role: string;
+  ip_address?: string;
+  ip_last_seen?: string;
+  port?: number;
+  agent_url?: string;
+  role?: string;
+  status?: string;
   state: NodeState;
-  assigned_cell_ids: string[];
-  last_heartbeat_at: string;
+  assigned_cell_ids?: string[];
+  last_heartbeat?: string;
+  last_heartbeat_at?: string;
   heartbeat_age_seconds: number;
-  consecutive_misses: number;
+  consecutive_misses?: number;
   is_online: boolean;
-  latest_host_telemetry: {
-    cpu_pct: number;
-    ram_pct: number;
-    rtt_ms: number;
-    worker_queue_depth: number;
-    label: string;
+  worker_active?: boolean;
+  worker_slots?: number;
+  latest_host_telemetry?: {
+    cpu_pct?: number;
+    ram_pct?: number;
+    memory_pct?: number;
+    rtt_ms?: number;
+    local_rtt_ms?: number;
+    worker_queue_depth?: number;
+    label?: string;
   };
 }
 
@@ -316,4 +361,79 @@ export interface AuditRecord {
   entity_id: string | null;
   state_version: number | null;
   details: Record<string, any>;
+}
+
+export interface MitigatingTower {
+  cell_id: string;
+  region: string;
+  locality: string;
+  lat: number;
+  lon: number;
+  distance_km: number;
+  capacity_mbps: number;
+  base_load_mbps: number;
+  headroom_before_mbps: number;
+  offload_allocated_mbps: number;
+  headroom_after_mbps: number;
+  util_after_pct: number;
+}
+
+export interface SurgeTower {
+  cell_id: string;
+  region: string;
+  locality: string;
+  lat: number;
+  lon: number;
+  distance_to_venue_km: number;
+  capacity_mbps: number;
+  base_load_mbps: number;
+  surge_uplift_mbps: number;
+  total_demand_mbps: number;
+  overload_pct: number;
+  is_overloaded: boolean;
+  deficit_mbps: number;
+}
+
+export interface LoadDistributionVector {
+  from_cell_id: string;
+  to_cell_id: string;
+  from_coords: [number, number];
+  to_coords: [number, number];
+  offload_mbps: number;
+  label: string;
+}
+
+export interface SurgeJustification {
+  locality: string;
+  spike_reason: string;
+  event_window: string;
+  estimated_attendees: number;
+  source_citation: string;
+  source_url: string;
+  traffic_breakdown: {
+    base_demand_mbps: number;
+    surge_uplift_mbps: number;
+    total_unmitigated_demand_mbps: number;
+    tower_capacity_mbps: number;
+    overload_pct: number;
+    offload_required_mbps: number;
+    total_offloaded_mbps: number;
+  };
+  hard_constraints: {
+    backhaul_margin: string;
+    latency_sla: string;
+    handover_churn: string;
+    standby_activation: string;
+  };
+}
+
+export interface RealtimeScanResponse {
+  status: string;
+  discovered_sources_count: number;
+  events: EventRecord[];
+  selected_event: EventRecord | null;
+  surge_tower: SurgeTower | null;
+  mitigating_towers: MitigatingTower[];
+  load_distribution: LoadDistributionVector[];
+  justification: SurgeJustification;
 }

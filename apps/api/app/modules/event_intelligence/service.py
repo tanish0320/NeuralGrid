@@ -47,7 +47,7 @@ class EventIntelligenceService:
                     city=request.city,
                     query_terms=request.query_terms,
                     max_records=request.max_candidates,
-                    timeout_seconds=8.0,
+                    timeout_seconds=3.5,
                 )
                 if gdelt_res.items:
                     gdelt_res.items = deduplicate_source_candidates(gdelt_res.items)

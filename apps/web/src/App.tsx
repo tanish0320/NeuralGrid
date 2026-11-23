@@ -7,6 +7,7 @@ import { PredictionOrchestration } from './pages/PredictionOrchestration';
 import { TwinNodeLab } from './pages/TwinNodeLab';
 import { Verification } from './pages/Verification';
 import { GovernanceAudit } from './pages/GovernanceAudit';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { api } from './services/api';
 import { useLiveWebSocket, WebSocketMessage } from './services/websocket';
 import {
@@ -160,66 +161,68 @@ export const App: React.FC = () => {
       onResetDemo={handleResetDemo}
       isResetting={isResetting}
     >
-      {currentScreen === 'command' && (
-        <CommandCentre
-          cells={cells}
-          simState={simState}
-          activeEvent={selectedEvent}
-          nodes={nodes}
-          onSelectScreen={setCurrentScreen}
-          onSelectCell={setSelectedCellId}
-        />
-      )}
+      <ErrorBoundary fallbackScreen={() => setCurrentScreen('command')}>
+        {currentScreen === 'command' && (
+          <CommandCentre
+            cells={cells}
+            simState={simState}
+            activeEvent={selectedEvent}
+            nodes={nodes}
+            onSelectScreen={setCurrentScreen}
+            onSelectCell={setSelectedCellId}
+          />
+        )}
 
-      {currentScreen === 'eventsense' && (
-        <EventSense
-          events={events}
-          selectedEvent={selectedEvent}
-          onSelectEvent={setSelectedEvent}
-          onRefreshEvents={refreshEvents}
-          activeSimulationId={simState?.simulation_id || null}
-        />
-      )}
+        {currentScreen === 'eventsense' && (
+          <EventSense
+            events={events}
+            selectedEvent={selectedEvent}
+            onSelectEvent={setSelectedEvent}
+            onRefreshEvents={refreshEvents}
+            activeSimulationId={simState?.simulation_id || null}
+          />
+        )}
 
-      {currentScreen === 'twin' && (
-        <NetworkTwin
-          cells={cells}
-          graphData={graphData}
-          simState={simState}
-          selectedCellId={selectedCellId}
-          onSelectCell={setSelectedCellId}
-          onRefreshSimulation={refreshSimulation}
-        />
-      )}
+        {currentScreen === 'twin' && (
+          <NetworkTwin
+            cells={cells}
+            graphData={graphData}
+            simState={simState}
+            selectedCellId={selectedCellId}
+            onSelectCell={setSelectedCellId}
+            onRefreshSimulation={refreshSimulation}
+          />
+        )}
 
-      {currentScreen === 'prediction' && (
-        <PredictionOrchestration
-          cells={cells}
-          simState={simState}
-          selectedCellId={selectedCellId}
-          onSelectCell={setSelectedCellId}
-          onRefreshSimulation={refreshSimulation}
-          onSelectScreen={setCurrentScreen}
-        />
-      )}
+        {currentScreen === 'prediction' && (
+          <PredictionOrchestration
+            cells={cells}
+            simState={simState}
+            selectedCellId={selectedCellId}
+            onSelectCell={setSelectedCellId}
+            onRefreshSimulation={refreshSimulation}
+            onSelectScreen={setCurrentScreen}
+          />
+        )}
 
-      {currentScreen === 'twinnode' && (
-        <TwinNodeLab
-          nodes={nodes}
-          onRefreshNodes={refreshNodes}
-        />
-      )}
+        {currentScreen === 'twinnode' && (
+          <TwinNodeLab
+            nodes={nodes}
+            onRefreshNodes={refreshNodes}
+          />
+        )}
 
-      {currentScreen === 'verification' && (
-        <Verification
-          simState={simState}
-          plans={plans}
-        />
-      )}
+        {currentScreen === 'verification' && (
+          <Verification
+            simState={simState}
+            plans={plans}
+          />
+        )}
 
-      {currentScreen === 'audit' && (
-        <GovernanceAudit />
-      )}
+        {currentScreen === 'audit' && (
+          <GovernanceAudit />
+        )}
+      </ErrorBoundary>
     </Shell>
   );
 };

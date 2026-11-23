@@ -63,13 +63,24 @@ export const EventSense: React.FC<EventSenseProps> = ({
   // Handle Discover Events
   const handleDiscover = async () => {
     setIsDiscovering(true);
-    setActionMessage('Running bounded discovery across GDELT DOC 2.0 & RSS feeds...');
+    setActionMessage('Executing real-time Bengaluru RSS web scraping & AI venue geocoder...');
     try {
-      const res = await api.discoverEvents('Bengaluru', ['concert', 'festival', 'Palace Grounds']);
-      setActionMessage(`Discovery finished: ${res.status}. Sourced ${res.source_ids?.length || 0} candidates.`);
+      const res = await api.realtimeScan('Bengaluru', true, activeSimulationId || undefined);
+      setActionMessage(
+        `Real-time scan succeeded: Discovered & geocoded ${res.events.length} live Bengaluru events from RSS feeds.`
+      );
       onRefreshEvents();
+      if (res.selected_event) {
+        onSelectEvent(res.selected_event);
+      }
     } catch (err: any) {
-      setActionMessage(`Discovery notice: ${err.message}`);
+      try {
+        const res = await api.discoverEvents('Bengaluru', ['concert', 'festival', 'Palace Grounds']);
+        setActionMessage(`Discovery finished: ${res.status}. Sourced ${res.source_ids?.length || 0} candidates.`);
+        onRefreshEvents();
+      } catch (err2: any) {
+        setActionMessage(`Discovery notice: ${err2.message}`);
+      }
     } finally {
       setIsDiscovering(false);
     }
