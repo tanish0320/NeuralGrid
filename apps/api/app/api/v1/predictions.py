@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from apps.api.app.core.state import AppContainer, get_container
-from apps.api.app.schemas.predictions import PredictionGenerateRequest, PredictionsResponse
+from apps.api.app.schemas.predictions import (
+    CellForecastDetailResponse,
+    ForecastRecord,
+    NetworkForecastSummaryResponse,
+    PredictionGenerateRequest,
+    PredictionsResponse,
+)
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -20,7 +27,40 @@ async def generate_predictions(
         sim_state=sim_state,
         horizons=request.horizons,
         cell_ids=request.cell_ids,
+        method=request.method,
     )
+
+
+@router.get("/cells/{cell_id}", response_model=CellForecastDetailResponse)
+async def get_cell_forecasts(
+    cell_id: str,
+    simulation_id: UUID | None = Query(default=None),
+    container: AppContainer = Depends(get_container),
+) -> CellForecastDetailResponse:
+    """Retrieve 5-horizon (5m, 15m, 30m, 60m, 120m) forecasts and uncertainty bounds for a single cell."""
+    detail = container.prediction_service.get_cell_forecast_detail(cell_id, simulation_id=simulation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Cell {cell_id} not found or no telemetry available")
+    return detail
+
+
+@router.get("/network", response_model=NetworkForecastSummaryResponse)
+async def get_network_forecasts(
+    simulation_id: UUID | None = Query(default=None),
+    container: AppContainer = Depends(get_container),
+) -> NetworkForecastSummaryResponse:
+    """Retrieve network-wide multi-horizon forecast metrics and congestion counts."""
+    return container.prediction_service.get_network_forecast_summary(simulation_id=simulation_id)
+
+
+@router.get("/history", response_model=list[ForecastRecord])
+async def get_forecast_history(
+    cell_id: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    container: AppContainer = Depends(get_container),
+) -> list[ForecastRecord]:
+    """Retrieve historical forecasts across cells and horizons."""
+    return container.pred_repo.get_forecast_history(cell_id=cell_id, limit=limit)
 
 
 @router.get("/{simulation_id}", response_model=PredictionsResponse)
@@ -42,3 +82,4 @@ async def get_predictions(
         forecasts=forecasts,
         risk_assessments=risks,
     )
+

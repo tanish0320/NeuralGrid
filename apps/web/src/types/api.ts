@@ -532,6 +532,50 @@ export interface CellOverlapSummary {
   risk_band: 'NORMAL' | 'ELEVATED' | 'HIGH' | 'CRITICAL';
 }
 
+export interface HorizonMetricDetail {
+  horizon_min: number;
+  target_at: string;
+  traffic_mbps: number;
+  traffic_p10: number;
+  traffic_p50: number;
+  traffic_p90: number;
+  latency_ms: number;
+  latency_p10: number;
+  latency_p50: number;
+  latency_p90: number;
+  projected_utilisation_pct: number;
+  risk_band: RiskBand;
+}
+
+export interface CellForecastDetailResponse {
+  cell_id: string;
+  region: string;
+  capacity_mbps: number;
+  backhaul_capacity_mbps: number;
+  current_demand_mbps: number;
+  current_utilisation_pct: number;
+  current_latency_ms: number;
+  risk_band: RiskBand;
+  horizons: HorizonMetricDetail[];
+  contributing_events: any[];
+  forecast_reasoning: string;
+  model_version: string;
+  generated_at: string;
+}
+
+export interface NetworkForecastSummaryResponse {
+  simulation_id: string | null;
+  state_version: number;
+  total_cells: number;
+  horizons: number[];
+  congested_cells_by_horizon: Record<string, number>;
+  max_demand_by_horizon: Record<string, number>;
+  avg_demand_by_horizon: Record<string, number>;
+  critical_cells: string[];
+  high_risk_cells: string[];
+  generated_at: string;
+}
+
 export interface ImpactRecalculateResponse {
   status: string;
   network_id: string | null;

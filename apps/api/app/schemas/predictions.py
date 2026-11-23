@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,8 +12,9 @@ class PredictionGenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     simulation_id: UUID
-    horizons: list[int] = Field(default_factory=lambda: [15, 30], min_length=1, max_length=4)
+    horizons: list[int] = Field(default_factory=lambda: [5, 15, 30, 60, 120], min_length=1, max_length=10)
     cell_ids: list[str] | None = None
+    method: str | None = None
 
 
 class ForecastRecord(BaseModel):
@@ -77,3 +78,54 @@ class PredictionsResponse(BaseModel):
     data_provenance: str
     forecasts: list[ForecastRecord]
     risk_assessments: list[CellRiskRecord]
+
+
+class HorizonMetricDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    horizon_min: int
+    target_at: datetime
+    traffic_mbps: float
+    traffic_p10: float
+    traffic_p50: float
+    traffic_p90: float
+    latency_ms: float
+    latency_p10: float
+    latency_p50: float
+    latency_p90: float
+    projected_utilisation_pct: float
+    risk_band: RiskBand
+
+
+class CellForecastDetailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cell_id: str
+    region: str
+    capacity_mbps: float
+    backhaul_capacity_mbps: float
+    current_demand_mbps: float
+    current_utilisation_pct: float
+    current_latency_ms: float
+    risk_band: RiskBand
+    horizons: list[HorizonMetricDetail]
+    contributing_events: list[dict[str, Any]] = Field(default_factory=list)
+    forecast_reasoning: str
+    model_version: str
+    generated_at: datetime
+
+
+class NetworkForecastSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    simulation_id: UUID | None
+    state_version: int
+    total_cells: int
+    horizons: list[int]
+    congested_cells_by_horizon: dict[int, int]
+    max_demand_by_horizon: dict[int, float]
+    avg_demand_by_horizon: dict[int, float]
+    critical_cells: list[str]
+    high_risk_cells: list[str]
+    generated_at: datetime
+

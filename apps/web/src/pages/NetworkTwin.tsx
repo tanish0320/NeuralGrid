@@ -19,11 +19,13 @@ import {
   Zap,
   RefreshCw,
   Activity,
+  Clock,
 } from 'lucide-react';
 import { Badge } from '../components/common/Badge';
 import { BangaloreGeoMap } from '../components/BangaloreGeoMap';
 import { api } from '../services/api';
 import {
+  CellForecastDetailResponse,
   CellImpactAggregated,
   CellOverlapSummary,
   CellRecord,
@@ -73,6 +75,9 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   const [isRecalculating, setIsRecalculating] = useState<boolean>(false);
   const [recalcSummary, setRecalcSummary] = useState<ImpactRecalculateResponse | null>(null);
 
+  // Phase 6: Multi-Horizon Forecasting state
+  const [cellForecasts, setCellForecasts] = useState<CellForecastDetailResponse | null>(null);
+
   const loadImpactData = () => {
     api.getCellImpacts().then(setCellImpacts).catch(() => {});
     api.getImpactOverlaps().then(setCellOverlaps).catch(() => {});
@@ -85,10 +90,12 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   useEffect(() => {
     if (selectedCellId) {
       api.getCellImpactDetail(selectedCellId).then(setSelectedCellImpact).catch(() => setSelectedCellImpact(null));
+      api.getCellForecasts(selectedCellId, simState?.simulation_id).then(setCellForecasts).catch(() => setCellForecasts(null));
     } else {
       setSelectedCellImpact(null);
+      setCellForecasts(null);
     }
-  }, [selectedCellId]);
+  }, [selectedCellId, simState?.simulation_id]);
 
   const handleRecalculateImpacts = async () => {
     setIsRecalculating(true);
@@ -610,6 +617,70 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                       ))}
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Phase 6: Multi-Horizon Forecasts (5m, 15m, 30m, 60m, 120m) */}
+              {cellForecasts && cellForecasts.horizons && cellForecasts.horizons.length > 0 && (
+                <div className="bg-noc-card/90 border border-purple-500/40 p-3 rounded space-y-2.5">
+                  <div className="flex items-center justify-between pb-2 border-b border-noc-border">
+                    <span className="text-[11px] font-mono font-bold text-purple-400 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      5-HORIZON TELECOM FORECASTS
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400">
+                      {cellForecasts.model_version}
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {cellForecasts.horizons.map((h) => (
+                      <div
+                        key={h.horizon_min}
+                        className="p-2 bg-noc-bg/80 border border-noc-border/60 rounded text-[10px] font-mono space-y-1"
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-300 font-bold">+{h.horizon_min}m Horizon</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              h.risk_band === 'CRITICAL'
+                                ? 'bg-red-950 text-red-300 border border-red-700'
+                                : h.risk_band === 'HIGH'
+                                ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                                : 'bg-slate-800 text-slate-300 border border-slate-700'
+                            }`}
+                          >
+                            {h.risk_band}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[9px]">
+                          <div>
+                            <span className="text-slate-500">Demand: </span>
+                            <span className="text-slate-200 font-semibold">{h.traffic_p50.toFixed(1)} Mbps</span>
+                            <div className="text-[8px] text-purple-300">
+                              [{h.traffic_p10.toFixed(0)} - {h.traffic_p90.toFixed(0)}]
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-slate-500">M/M/1 Latency: </span>
+                            <span className="text-slate-200 font-semibold">{h.latency_p50.toFixed(1)} ms</span>
+                            <div className="text-[8px] text-purple-300">
+                              [{h.latency_p10.toFixed(0)} - {h.latency_p90.toFixed(0)}]
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-[9px] text-slate-400 flex justify-between">
+                          <span>Projected Utilisation: {h.projected_utilisation_pct.toFixed(1)}%</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {cellForecasts.forecast_reasoning && (
+                    <div className="text-[9px] font-mono text-slate-400 p-1.5 bg-noc-bg/50 rounded border border-noc-border/40">
+                      <span className="text-purple-300 font-semibold">Attribution:</span> {cellForecasts.forecast_reasoning}
+                    </div>
+                  )}
                 </div>
               )}
 

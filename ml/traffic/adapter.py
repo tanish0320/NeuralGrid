@@ -129,7 +129,12 @@ class XGBoostForecastProvider:
 
                 if self.model is not None:
                     try:
-                        pred_demand = float(self.model.predict([fv.to_list()])[0])
+                        feat_arr = (
+                            fv.to_legacy_list()
+                            if hasattr(self.model, "n_features_in_") and self.model.n_features_in_ == 14
+                            else fv.to_list()
+                        )
+                        pred_demand = float(self.model.predict([feat_arr])[0])
                         # Adjust for horizon scaling beyond 15m if needed
                         if horizon > 15:
                             pred_demand += slope * (horizon - 15) / 5.0

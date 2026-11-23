@@ -64,7 +64,12 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
     if (!simState) return;
     setIsLoadingPreds(true);
     try {
-      const predData = await api.generatePredictions(simState.simulation_id, [15, 30]);
+      const predData = await api.generatePredictions(
+        simState.simulation_id,
+        [5, 15, 30, 60, 120],
+        undefined,
+        'xgboost'
+      );
       setPredictions(predData);
       const planData = await api.getPlans(simState.simulation_id);
       setPlans(planData);

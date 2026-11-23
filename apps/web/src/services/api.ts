@@ -249,16 +249,30 @@ export const api = {
     }),
 
   // Predictions & Risk
-  generatePredictions: (simId: string, horizons = [15, 30], cellIds?: string[]) =>
+  generatePredictions: (simId: string, horizons = [5, 15, 30, 60, 120], cellIds?: string[], method = 'xgboost') =>
     fetchJson<PredictionsResponse>('/api/v1/predictions/generate', {
       method: 'POST',
       body: JSON.stringify({
         simulation_id: simId,
         horizons,
         cell_ids: cellIds,
+        method,
       }),
     }),
   getPredictions: (simId: string) => fetchJson<PredictionsResponse>(`/api/v1/predictions/${simId}`),
+  getCellForecasts: (cellId: string, simulationId?: string) => {
+    const q = simulationId ? `?simulation_id=${simulationId}` : '';
+    return fetchJson<import('../types/api').CellForecastDetailResponse>(`/api/v1/predictions/cells/${cellId}${q}`);
+  },
+  getNetworkForecasts: (simulationId?: string) => {
+    const q = simulationId ? `?simulation_id=${simulationId}` : '';
+    return fetchJson<import('../types/api').NetworkForecastSummaryResponse>(`/api/v1/predictions/network${q}`);
+  },
+  getForecastHistory: (cellId?: string, limit = 50) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cellId) params.append('cell_id', cellId);
+    return fetchJson<import('../types/api').ForecastRecord[]>(`/api/v1/predictions/history?${params.toString()}`);
+  },
 
   // Plans & Governance
   generatePlan: async (simId: string, stateVersion: number, goal = 'Protect event-area connectivity') => {

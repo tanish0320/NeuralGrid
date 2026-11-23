@@ -93,6 +93,7 @@ class AppContainer:
             pred_repo=self.pred_repo,
             audit=self.audit,
             ws_manager=self.ws_manager,
+            impact_repo=self.impact_repo,
         )
         self.twinnode_controller = TwinNodeController(
             settings=settings,

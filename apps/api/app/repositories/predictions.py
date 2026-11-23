@@ -146,3 +146,74 @@ class PredictionRepository:
             (str(run_id), sv),
         )
         return [self._row_to_forecast(r) for r in f_rows], [self._row_to_risk(r) for r in r_rows]
+
+    def get_forecasts_for_cell(
+        self, cell_id: str, run_id: UUID | str | None = None
+    ) -> list[ForecastRecord]:
+        if run_id:
+            latest = self.db.fetchone(
+                "SELECT MAX(state_version) AS max_sv FROM forecasts WHERE run_id = ?",
+                (str(run_id),),
+            )
+            sv = int(latest["max_sv"]) if latest and latest["max_sv"] is not None else None
+            if sv is None:
+                return []
+            rows = self.db.fetchall(
+                """
+                SELECT * FROM forecasts
+                WHERE run_id = ? AND state_version = ? AND cell_id = ?
+                ORDER BY horizon_min ASC, metric ASC
+                """,
+                (str(run_id), sv, cell_id),
+            )
+        else:
+            rows = self.db.fetchall(
+                """
+                SELECT * FROM forecasts
+                WHERE cell_id = ?
+                ORDER BY generated_at DESC, horizon_min ASC
+                LIMIT 50
+                """,
+                (cell_id,),
+            )
+        return [self._row_to_forecast(r) for r in rows]
+
+    def get_forecast_history(
+        self, cell_id: str | None = None, limit: int = 100
+    ) -> list[ForecastRecord]:
+        if cell_id:
+            rows = self.db.fetchall(
+                """
+                SELECT * FROM forecasts
+                WHERE cell_id = ?
+                ORDER BY generated_at DESC, horizon_min ASC
+                LIMIT ?
+                """,
+                (cell_id, limit),
+            )
+        else:
+            rows = self.db.fetchall(
+                """
+                SELECT * FROM forecasts
+                ORDER BY generated_at DESC, cell_id ASC, horizon_min ASC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        return [self._row_to_forecast(r) for r in rows]
+
+    def get_risks_for_run(
+        self, run_id: UUID | str
+    ) -> list[CellRiskRecord]:
+        latest = self.db.fetchone(
+            "SELECT MAX(state_version) AS max_sv FROM risk_assessments WHERE run_id = ?",
+            (str(run_id),),
+        )
+        if not latest or latest["max_sv"] is None:
+            return []
+        sv = int(latest["max_sv"])
+        rows = self.db.fetchall(
+            "SELECT * FROM risk_assessments WHERE run_id = ? AND state_version = ? ORDER BY cell_id ASC",
+            (str(run_id), sv),
+        )
+        return [self._row_to_risk(r) for r in rows]
