@@ -39,7 +39,12 @@ export const App: React.FC = () => {
   // WebSocket message handler
   const handleWsMessage = useCallback((msg: WebSocketMessage) => {
     if (msg.event === 'tick.updated' && msg.data) {
-      setSimState(msg.data);
+      if (Array.isArray(msg.data.telemetry) && msg.data.telemetry.length > 0) {
+        setSimState(msg.data);
+      } else {
+        // Retain existing telemetry array if WS broadcast only transmits delta/summary
+        setSimState((prev) => (prev ? { ...prev, ...msg.data, telemetry: prev.telemetry || [] } : msg.data));
+      }
     } else if (msg.event.startsWith('event.')) {
       refreshEvents();
     } else if (msg.event.startsWith('node.')) {

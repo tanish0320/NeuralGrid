@@ -32,8 +32,9 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
   const [targetNodeId, setTargetNodeId] = useState<string>('NODE-JUNAID');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
-  const tanishNode = nodes.find((n) => n.node_id === 'NODE-TANISH');
-  const junaidNode = nodes.find((n) => n.node_id === 'NODE-JUNAID');
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const tanishNode = safeNodes.find((n) => n.node_id === 'NODE-TANISH');
+  const junaidNode = safeNodes.find((n) => n.node_id === 'NODE-JUNAID');
 
   const loadTasks = async () => {
     try {

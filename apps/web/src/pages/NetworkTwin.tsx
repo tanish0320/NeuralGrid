@@ -74,17 +74,21 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
       .catch(() => {});
   }, [simState?.simulation_id]);
 
-  const selectedCell = cells.find((c) => c.cell_id === selectedCellId);
-  const selectedTelemetry = simState?.telemetry.find((t) => t.cell_id === selectedCellId);
+  const safeCells = Array.isArray(cells) ? cells : [];
+  const selectedCell = safeCells.find((c) => c.cell_id === selectedCellId);
+  const safeTelemetry = Array.isArray(simState?.telemetry) ? simState.telemetry : [];
+  const selectedTelemetry = safeTelemetry.find((t) => t.cell_id === selectedCellId);
 
   // Initialize Cytoscape
   useEffect(() => {
-    if (!containerRef.current || !graphData || graphData.nodes.length === 0) return;
+    const safeNodes = Array.isArray(graphData?.nodes) ? graphData.nodes : [];
+    const safeEdges = Array.isArray(graphData?.edges) ? graphData.edges : [];
+    if (!containerRef.current || safeNodes.length === 0) return;
 
     const elements: cytoscape.ElementDefinition[] = [];
 
     // Nodes
-    graphData.nodes.forEach((n, idx) => {
+    safeNodes.forEach((n, idx) => {
       const id = n.id || n.cell_id || `CELL-${idx}`;
       const label = n.label || id.replace('CELL-BLR-', '#');
       // Deterministic synthetic coordinate layout
@@ -107,7 +111,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
     });
 
     // Edges
-    graphData.edges.forEach((e, idx) => {
+    safeEdges.forEach((e, idx) => {
       const id = e.id || e.edge_id || `EDGE-${idx}`;
       const source = e.source || e.source_cell_id;
       const target = e.target || e.target_cell_id;
@@ -469,7 +473,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
                 <div className="flex justify-between">
                   <span className="text-slate-400">Operational State:</span>
                   <span className="text-noc-cyan font-semibold">
-                    {selectedTelemetry?.cell_state || selectedCell.current_state}
+                    {selectedTelemetry?.cell_state || selectedCell?.current_state || selectedCell?.initial_state || 'ACTIVE'}
                   </span>
                 </div>
               </div>

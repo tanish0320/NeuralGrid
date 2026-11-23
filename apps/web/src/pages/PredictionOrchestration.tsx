@@ -200,10 +200,12 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
   };
 
   // Filter forecasts for currently active cell
-  const cellForecasts = predictions?.forecasts.filter((f) => f.cell_id === activeCellId) || [];
+  const safeForecasts = Array.isArray(predictions?.forecasts) ? predictions.forecasts : [];
+  const cellForecasts = safeForecasts.filter((f) => f.cell_id === activeCellId);
   const trafficForecasts = cellForecasts.filter((f) => f.metric === 'traffic_mbps');
   const latencyForecasts = cellForecasts.filter((f) => f.metric === 'simulated_end_to_end_latency_ms');
-  const activeRisk = predictions?.risk_assessments.find((r) => r.cell_id === activeCellId);
+  const safeRisks = Array.isArray(predictions?.risk_assessments) ? predictions.risk_assessments : [];
+  const activeRisk = safeRisks.find((r) => r.cell_id === activeCellId);
 
   const surgeTower = realtimeData?.surge_tower;
   const isCurrentlySurgeCell = surgeTower && activeCellId === surgeTower.cell_id;

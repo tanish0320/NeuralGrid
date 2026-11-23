@@ -103,8 +103,9 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
     .sort((a, b) => b.utilisation_pct - a.utilisation_pct)
     .slice(0, 8);
 
-  const junaidNode = nodes.find((n) => n.node_id === 'NODE-JUNAID');
-  const tanishNode = nodes.find((n) => n.node_id === 'NODE-TANISH');
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const junaidNode = safeNodes.find((n) => n.node_id === 'NODE-JUNAID');
+  const tanishNode = safeNodes.find((n) => n.node_id === 'NODE-TANISH');
 
   return (
     <div className="space-y-5">
