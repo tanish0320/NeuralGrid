@@ -23,9 +23,15 @@ FetchStatus = Literal[
 ExtractionStatus = Literal["NOT_RUN", "SUCCEEDED", "PARTIAL", "NO_EVENT_FIELDS", "FAILED"]
 EventOrigin = Literal["SOURCE_DISCOVERED", "MANUAL_INPUT", "SEEDED_DEMO"]
 VerificationStatus = Literal[
+    "DISCOVERED",
+    "PARTIALLY_VERIFIED",
+    "CORROBORATED",
+    "VERIFIED",
+    "CONFLICTED",
+    "CANCELLED",
+    "EXPIRED",
     "UNVERIFIED",
     "SINGLE_SOURCE",
-    "CORROBORATED",
     "MANUALLY_VERIFIED",
     "DEMO_SCENARIO",
 ]
@@ -39,7 +45,17 @@ SourceType = Literal[
     "social_post",
     "manual_reference",
 ]
-EventLifecycleStatus = Literal["CANDIDATE", "CONFIRMED", "REJECTED"]
+EventLifecycleStatus = Literal[
+    "UPCOMING",
+    "ONGOING",
+    "COMPLETED",
+    "CANCELLED",
+    "POSTPONED",
+    "RECURRING",
+    "CANDIDATE",
+    "CONFIRMED",
+    "REJECTED",
+]
 AttendanceScenario = Literal["LOW", "EXPECTED", "HIGH"]
 RegistryHealthStatus = Literal["HEALTHY", "DEGRADED", "UNAVAILABLE", "AWAITING_CREDENTIALS", "DISABLED"]
 
@@ -383,4 +399,43 @@ class EventEvidenceRecord(ContractModel):
     evidence_confidence: float = 0.8
     raw_metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+
+class EventHistoryRecord(ContractModel):
+    history_id: str
+    event_id: UUID
+    change_type: str
+    previous_state: dict[str, Any] = Field(default_factory=dict)
+    new_state: dict[str, Any] = Field(default_factory=dict)
+    reason: str | None = None
+    recorded_at: datetime
+
+
+class FieldAttributionItem(ContractModel):
+    field_name: str
+    chosen_value: Any
+    source_platform: str
+    source_reliability: float
+    confidence: float
+    basis: str  # CONFIRMED, INFERRED, ESTIMATED
+    attribution_reason: str
+
+
+class FieldConflictItem(ContractModel):
+    field_name: str
+    preferred_value: Any
+    conflicting_value: Any
+    preferred_source: str
+    conflicting_source: str
+    severity: str = "WARNING"  # CRITICAL, WARNING, INFO
+    detected_at: datetime
+
+
+class CanonicalEventDetailResponse(ContractModel):
+    event: EventRecord
+    evidence: list[EventEvidenceRecord] = Field(default_factory=list)
+    field_attribution: dict[str, Any] = Field(default_factory=dict)
+    conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    resolution_metadata: dict[str, Any] = Field(default_factory=dict)
+    history: list[EventHistoryRecord] = Field(default_factory=list)
 

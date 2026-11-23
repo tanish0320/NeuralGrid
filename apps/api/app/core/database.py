@@ -388,9 +388,21 @@ CREATE TABLE IF NOT EXISTS event_evidence (
     FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS event_history (
+    history_id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    previous_state_json TEXT NOT NULL DEFAULT '{}',
+    new_state_json TEXT NOT NULL DEFAULT '{}',
+    reason TEXT,
+    recorded_at TEXT NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_telemetry_run_tick ON telemetry(run_id, tick);
 CREATE INDEX IF NOT EXISTS idx_sources_run ON event_sources(discovery_run_id);
 CREATE INDEX IF NOT EXISTS idx_evidence_event ON event_evidence(event_id);
+CREATE INDEX IF NOT EXISTS idx_event_history_event ON event_history(event_id);
 CREATE INDEX IF NOT EXISTS idx_registry_platform ON event_source_registry(platform);
 CREATE INDEX IF NOT EXISTS idx_forecasts_run ON forecasts(run_id, state_version);
 CREATE INDEX IF NOT EXISTS idx_plans_run ON plans(run_id);

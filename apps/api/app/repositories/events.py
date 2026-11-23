@@ -9,6 +9,7 @@ from uuid import UUID
 from apps.api.app.core.database import Database, parse_utc, utc_iso, utc_now
 from apps.api.app.schemas.events import (
     AffectedCellImpact,
+    EventHistoryRecord,
     EventImpactResponse,
     EventRecord,
 )
@@ -230,3 +231,68 @@ class EventRepository:
             assumptions=json.loads(row["assumptions_json"]),
             created_at=parse_utc(row["created_at"]),
         )
+
+    def add_history_entry(self, entry: EventHistoryRecord) -> None:
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO event_history (
+                    history_id, event_id, change_type, previous_state_json,
+                    new_state_json, reason, recorded_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry.history_id,
+                    str(entry.event_id),
+                    entry.change_type,
+                    json.dumps(entry.previous_state, default=str),
+                    json.dumps(entry.new_state, default=str),
+                    entry.reason,
+                    utc_iso(entry.recorded_at),
+                ),
+            )
+
+    def list_history_for_event(self, event_id: UUID | str) -> list[EventHistoryRecord]:
+        rows = self.db.fetchall(
+            "SELECT * FROM event_history WHERE event_id = ? ORDER BY recorded_at ASC",
+            (str(event_id),),
+        )
+        return [
+            EventHistoryRecord(
+                history_id=r["history_id"],
+                event_id=UUID(r["event_id"]),
+                change_type=r["change_type"],
+                previous_state=json.loads(r["previous_state_json"]),
+                new_state=json.loads(r["new_state_json"]),
+                reason=r["reason"],
+                recorded_at=parse_utc(r["recorded_at"]),
+            )
+            for r in rows
+        ]
+
+    def list_events_filtered(
+        self,
+        *,
+        verification_status: str | None = None,
+        lifecycle_status: str | None = None,
+        city: str | None = None,
+        search: str | None = None,
+    ) -> list[EventRecord]:
+        query = "SELECT * FROM events WHERE 1=1"
+        params: list[Any] = []
+        if verification_status:
+            query += " AND verification_status = ?"
+            params.append(verification_status)
+        if lifecycle_status:
+            query += " AND status = ?"
+            params.append(lifecycle_status)
+        if city:
+            query += " AND LOWER(city) = LOWER(?)"
+            params.append(city)
+        if search:
+            query += " AND (LOWER(name) LIKE ? OR LOWER(venue_name) LIKE ?)"
+            term = f"%{search.lower()}%"
+            params.extend([term, term])
+        query += " ORDER BY created_at DESC"
+        rows = self.db.fetchall(query, tuple(params))
+        return [self._row_to_event(r) for r in rows]

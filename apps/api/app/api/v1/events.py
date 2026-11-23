@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from apps.api.app.core.database import utc_now
 from apps.api.app.core.state import AppContainer, get_container
@@ -12,8 +13,11 @@ from apps.api.app.modules.scenario_engine.event_impact import (
     calculate_event_impact,
 )
 from apps.api.app.schemas.events import (
+    CanonicalEventDetailResponse,
     EventConfirmRequest,
     EventCreateRequest,
+    EventEvidenceRecord,
+    EventHistoryRecord,
     EventImpactRequest,
     EventImpactResponse,
     EventRecord,
@@ -84,8 +88,19 @@ async def create_event(
 
 @router.get("", response_model=list[EventRecord])
 async def list_events(
+    verification_status: str | None = Query(default=None),
+    lifecycle_status: str | None = Query(default=None),
+    city: str | None = Query(default=None),
+    search: str | None = Query(default=None),
     container: AppContainer = Depends(get_container),
 ) -> list[EventRecord]:
+    if any([verification_status, lifecycle_status, city, search]):
+        return container.event_repo.list_events_filtered(
+            verification_status=verification_status,
+            lifecycle_status=lifecycle_status,
+            city=city,
+            search=search,
+        )
     return container.event_repo.list_events()
 
 
@@ -98,6 +113,46 @@ async def get_event(
     if ev is None:
         raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
     return ev
+
+
+@router.get("/{event_id}/canonical", response_model=CanonicalEventDetailResponse)
+async def get_canonical_event_detail(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> CanonicalEventDetailResponse:
+    """Retrieve full canonical event details including associated evidence, field attribution, conflicts, and history."""
+    detail = container.canonical_resolver.get_canonical_event_detail(event_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Canonical event {event_id} not found")
+    return detail
+
+
+@router.get("/{event_id}/evidence", response_model=list[EventEvidenceRecord])
+async def get_event_evidence(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> list[EventEvidenceRecord]:
+    return container.registry_repo.list_evidence_for_event(event_id)
+
+
+@router.get("/{event_id}/conflicts", response_model=list[dict[str, Any]])
+async def get_event_conflicts(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> list[dict[str, Any]]:
+    ev = container.event_repo.get_event(event_id)
+    if ev is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
+    prov = ev.field_provenance or {}
+    return prov.get("conflicts", [])
+
+
+@router.get("/{event_id}/history", response_model=list[EventHistoryRecord])
+async def get_event_history(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> list[EventHistoryRecord]:
+    return container.event_repo.list_history_for_event(event_id)
 
 
 @router.post("/{event_id}/confirm", response_model=EventRecord)

@@ -115,6 +115,7 @@ class EventIntelligenceOrchestrator:
         ws_manager: ConnectionManager,
         service: EventIntelligenceServiceProtocol | None | object = _AUTO_LOAD,
         dns_resolver: DnsResolver | None = None,
+        canonical_resolver: Any | None = None,
     ) -> None:
         self.settings = settings
         self.source_repo = source_repo
@@ -123,6 +124,7 @@ class EventIntelligenceOrchestrator:
         self.ws = ws_manager
         self._injected_service = service
         self._dns_resolver = dns_resolver
+        self.canonical_resolver = canonical_resolver
 
     def get_service(self) -> EventIntelligenceServiceProtocol | None:
         if self._injected_service is _AUTO_LOAD:
@@ -563,6 +565,27 @@ class EventIntelligenceOrchestrator:
         name = (fields.get("event_name") or fields.get("name") or source.title or "").strip()
         if not name:
             return None
+
+        # Delegate to CanonicalEventResolver if configured
+        if getattr(self, "canonical_resolver", None):
+            res_event, is_new, match_info = self.canonical_resolver.resolve_candidate(
+                title=name,
+                source_id=str(source.source_id),
+                source_platform=source.discovery_provider,
+                source_url=source.url,
+                domain=source.domain,
+                extracted_fields=fields,
+                source_timestamp=source.published_at or source.discovered_at,
+                content_hash=source.content_hash,
+                evidence_type=(
+                    "TICKETING_LISTING"
+                    if "ticket" in str(source.source_type).lower() or "bookmyshow" in source.discovery_provider.lower()
+                    else "NEWS_ANNOUNCEMENT"
+                ),
+                raw_metadata={"fetch_provider": source.fetch_provider, "canonical_url": source.canonical_url},
+                city_hint=city_hint,
+            )
+            return res_event
 
         event_type = str(fields.get("event_type") or "public_event").strip()
         venue_name = fields.get("venue_name") or fields.get("venue")

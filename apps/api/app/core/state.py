@@ -27,6 +27,7 @@ from apps.api.app.repositories.source_registry import SourceRegistryRepository
 from apps.api.app.repositories.twinnode import TwinNodeRepository
 from apps.api.app.repositories.verification import VerificationRepository
 from apps.api.app.modules.event_intelligence.connectors.registry import ConnectorRegistry
+from apps.api.app.modules.event_intelligence.resolution.resolver import CanonicalEventResolver
 
 
 class AppContainer:
@@ -56,6 +57,7 @@ class AppContainer:
         self.verification_repo = VerificationRepository(self.db)
         self.registry_repo = SourceRegistryRepository(self.db)
         self.connector_registry = ConnectorRegistry(settings)
+        self.canonical_resolver = CanonicalEventResolver(self.event_repo, self.registry_repo)
 
         self.event_orchestrator = EventIntelligenceOrchestrator(
             settings=settings,
@@ -65,6 +67,7 @@ class AppContainer:
             ws_manager=self.ws_manager,
             service=event_intelligence_service,
             dns_resolver=dns_resolver,
+            canonical_resolver=self.canonical_resolver,
         )
         self.sim_manager = SimulationManager(
             network_repo=self.network_repo,

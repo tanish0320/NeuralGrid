@@ -13,12 +13,14 @@ from apps.api.app.core.database import utc_now
 from apps.api.app.core.state import AppContainer, get_container
 from apps.api.app.modules.dependency_graph.graph_builder import haversine_km
 from apps.api.app.schemas.events import (
+    CanonicalEventDetailResponse,
     CrawlRequest,
     CrawlResponse,
     DiscoveryRunDetailResponse,
     EventDiscoveryRequest,
     EventDiscoveryResponse,
     EventEvidenceRecord,
+    EventHistoryRecord,
     EventRecord,
     EventSourceRecord,
     RealtimeScanRequest,
@@ -382,4 +384,36 @@ async def get_event_evidence(
 ) -> list[EventEvidenceRecord]:
     """Retrieve all supporting multi-source evidence and verification records for an event."""
     return container.registry_repo.list_evidence_for_event(event_id)
+
+
+@router.get("/events/{event_id}/canonical", response_model=CanonicalEventDetailResponse)
+async def get_canonical_event_detail(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> CanonicalEventDetailResponse:
+    """Retrieve full canonical event details including associated evidence, field attribution, conflicts, and history."""
+    detail = container.canonical_resolver.get_canonical_event_detail(event_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Canonical event {event_id} not found")
+    return detail
+
+
+@router.get("/events/{event_id}/conflicts", response_model=list[dict[str, Any]])
+async def get_event_conflicts(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> list[dict[str, Any]]:
+    ev = container.event_repo.get_event(event_id)
+    if ev is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
+    prov = ev.field_provenance or {}
+    return prov.get("conflicts", [])
+
+
+@router.get("/events/{event_id}/history", response_model=list[EventHistoryRecord])
+async def get_event_history(
+    event_id: UUID,
+    container: AppContainer = Depends(get_container),
+) -> list[EventHistoryRecord]:
+    return container.event_repo.list_history_for_event(event_id)
 
