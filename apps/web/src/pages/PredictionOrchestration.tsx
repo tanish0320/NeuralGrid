@@ -38,6 +38,7 @@ interface PredictionOrchestrationProps {
   selectedCellId: string | null;
   onSelectCell: (cellId: string) => void;
   onRefreshSimulation: () => void;
+  onRefreshPlans?: () => void;
   onSelectScreen: (screen: any) => void;
 }
 
@@ -47,6 +48,7 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
   selectedCellId,
   onSelectCell,
   onRefreshSimulation,
+  onRefreshPlans,
   onSelectScreen,
 }) => {
   const [predictions, setPredictions] = useState<PredictionsResponse | null>(null);
@@ -59,9 +61,12 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
   const [isActing, setIsActing] = useState<boolean>(false);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const loadingRef = React.useRef(false);
+
   // Load predictions and plans for current simulation
   const loadData = async () => {
-    if (!simState) return;
+    if (!simState || loadingRef.current) return;
+    loadingRef.current = true;
     setIsLoadingPreds(true);
     try {
       const predData = await api.generatePredictions(
@@ -74,11 +79,18 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
       const planData = await api.getPlans(simState.simulation_id);
       setPlans(planData);
       if (planData.length > 0) {
-        setSelectedPlan(planData[0]);
+        setSelectedPlan((prev) => {
+          if (prev) {
+            const updated = planData.find((p) => p.plan_id === prev.plan_id);
+            if (updated) return updated;
+          }
+          return planData[0];
+        });
       }
     } catch (err: any) {
       setNotice(`Predictions notice: ${err.message}`);
     } finally {
+      loadingRef.current = false;
       setIsLoadingPreds(false);
     }
   };
@@ -109,9 +121,9 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
 
   useEffect(() => {
     loadData();
-    // Auto-fetch real-time event surge state on initial load
-    if (!realtimeData) {
-      api.realtimeScan('Bengaluru', true, simState?.simulation_id)
+    // Auto-fetch real-time event surge state on initial load (read-only so state_version isn't bumped)
+    if (!realtimeData && simState?.simulation_id) {
+      api.realtimeScan('Bengaluru', false, simState.simulation_id)
         .then((res) => {
           setRealtimeData(res);
           if (res.surge_tower && !selectedCellId) {
@@ -148,6 +160,7 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
       setPlans([newPlan, ...plans]);
       setSelectedPlan(newPlan);
       setNotice(`New plan ${newPlan.plan_id.substring(0, 8)} generated. Status: PENDING_APPROVAL.`);
+      onRefreshPlans?.();
     } catch (err: any) {
       setNotice(`Plan generation failed: ${err.message}`);
     } finally {
@@ -160,10 +173,16 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
     if (!selectedPlan || !simState) return;
     setIsActing(true);
     try {
-      const approved = await api.approvePlan(selectedPlan.plan_id, simState.state_version, 'operator-1');
+      const approved = await api.approvePlan(
+        selectedPlan.plan_id,
+        simState.state_version,
+        'operator-1',
+        selectedPlan.version ?? 1
+      );
       setSelectedPlan(approved);
-      setNotice(`Plan ${approved.plan_id.substring(0, 8)} APPROVED by operator.`);
-      loadData();
+      setNotice(`Plan ${approved.plan_id.substring(0, 8)} (v${approved.version ?? 1}) APPROVED by operator.`);
+      await loadData();
+      onRefreshPlans?.();
     } catch (err: any) {
       setNotice(`Approval error: ${err.message}`);
     } finally {
@@ -179,7 +198,8 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
       const rejected = await api.rejectPlan(selectedPlan.plan_id, 'Unacceptable latency tradeoffs');
       setSelectedPlan(rejected);
       setNotice(`Plan ${rejected.plan_id.substring(0, 8)} REJECTED.`);
-      loadData();
+      await loadData();
+      onRefreshPlans?.();
     } catch (err: any) {
       setNotice(`Rejection error: ${err.message}`);
     } finally {
@@ -194,9 +214,10 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
     try {
       const result = await api.executePlan(selectedPlan.plan_id, simState.state_version);
       setSelectedPlan(result.plan);
-      setNotice(`Plan ${result.plan.plan_id.substring(0, 8)} EXECUTED in simulation.`);
-      onRefreshSimulation();
-      loadData();
+      setNotice(`Plan ${result.plan.plan_id.substring(0, 8)} EXECUTED in simulation (state v${result.new_simulation_state_version}).`);
+      await onRefreshSimulation();
+      await loadData();
+      onRefreshPlans?.();
     } catch (err: any) {
       setNotice(`Execution blocked by governance: ${err.message}`);
     } finally {
@@ -228,7 +249,7 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
       )}
 
       {/* Real-Time Crowd Surge Intelligence Spotlight Banner */}
-      {realtimeData?.justification && (
+      {realtimeData?.justification?.spike_reason && realtimeData?.surge_tower && (
         <div className="bg-gradient-to-r from-red-950/40 via-noc-surface to-noc-surface border border-red-500/40 rounded-lg p-4 shadow-lg">
           <div className="flex items-center justify-between pb-2.5 border-b border-noc-border">
             <div className="flex items-center gap-2.5">
@@ -281,11 +302,11 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                 <span className="text-slate-500">·</span>
                 <Users className="w-3.5 h-3.5 text-noc-amber" />
                 <span className="text-slate-300">
-                  ~{realtimeData.justification.estimated_attendees.toLocaleString()} Attendees
+                  ~{(realtimeData.justification.estimated_attendees ?? 0).toLocaleString()} Attendees
                 </span>
               </div>
               <div className="text-[10px] text-slate-500 pt-1">
-                Source: {realtimeData.justification.source_citation}
+                Source: {realtimeData.justification.source_citation || 'RSS / EventSense'}
               </div>
             </div>
 
@@ -320,11 +341,11 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
               <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
                 <span>DONOR MITIGATING TOWERS</span>
                 <span className="text-noc-cyan font-bold">
-                  {realtimeData.mitigating_towers.length} Active
+                  {(realtimeData.mitigating_towers || []).length} Active
                 </span>
               </div>
               <div className="space-y-1">
-                {realtimeData.mitigating_towers.slice(0, 3).map((donor) => (
+                {(realtimeData.mitigating_towers || []).slice(0, 3).map((donor) => (
                   <div
                     key={donor.cell_id}
                     onClick={() => onSelectCell(donor.cell_id)}
@@ -356,7 +377,22 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                   Forecast for {activeCellId} {isCurrentlySurgeCell && '(SURGE EPICENTER)'}
                 </span>
               </div>
-              <Badge type="MODEL_PREDICTION" label={predictions?.method || 'XGBOOST V1.0'} />
+              <div className="flex items-center gap-2">
+                {cells.length > 0 && (
+                  <select
+                    value={activeCellId}
+                    onChange={(e) => onSelectCell(e.target.value)}
+                    className="bg-noc-card border border-noc-border rounded px-2 py-0.5 text-[10px] font-mono text-slate-200"
+                  >
+                    {cells.map((c) => (
+                      <option key={c.cell_id} value={c.cell_id}>
+                        {c.cell_id}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <Badge type="MODEL_PREDICTION" label={predictions?.method || 'XGBOOST V1.0'} />
+              </div>
             </div>
 
             {/* Metric Chart Cards */}
@@ -377,21 +413,23 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                       <div className="text-right">
                         <span
                           className={`font-bold ${
-                            tf.predicted_value >= 400 ? 'text-red-400' : 'text-slate-100'
+                            (tf.predicted_value ?? 0) >= 400 ? 'text-red-400' : 'text-slate-100'
                           }`}
                         >
-                          {tf.predicted_value.toFixed(1)} Mbps
+                          {Number(tf.predicted_value ?? 0).toFixed(1)} Mbps
                         </span>
-                        {tf.p10 && tf.p90 && (
+                        {tf.p10 != null && tf.p90 != null && (
                           <div className="text-[9px] text-purple-300">
-                            P10: {tf.p10.toFixed(0)} | P90: {tf.p90.toFixed(0)}
+                            P10: {Number(tf.p10).toFixed(0)} | P90: {Number(tf.p90).toFixed(0)}
                           </div>
                         )}
                       </div>
                     </div>
                   ))}
                   {trafficForecasts.length === 0 && (
-                    <div className="text-slate-500 text-[11px] py-2">Click "Generate Predictions"</div>
+                    <div className="text-slate-500 text-[11px] py-2">
+                      {isLoadingPreds ? 'Generating predictions...' : 'Select a cell or refresh simulation'}
+                    </div>
                   )}
                 </div>
               </div>
@@ -412,21 +450,23 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                       <div className="text-right">
                         <span
                           className={`font-bold ${
-                            lf.predicted_value >= 45 ? 'text-red-400' : 'text-slate-100'
+                            (lf.predicted_value ?? 0) >= 45 ? 'text-red-400' : 'text-slate-100'
                           }`}
                         >
-                          {lf.predicted_value.toFixed(1)} ms
+                          {Number(lf.predicted_value ?? 0).toFixed(1)} ms
                         </span>
-                        {lf.p10 && lf.p90 && (
+                        {lf.p10 != null && lf.p90 != null && (
                           <div className="text-[9px] text-purple-300">
-                            P10: {lf.p10.toFixed(0)} | P90: {lf.p90.toFixed(0)}
+                            P10: {Number(lf.p10).toFixed(0)} | P90: {Number(lf.p90).toFixed(0)}
                           </div>
                         )}
                       </div>
                     </div>
                   ))}
                   {latencyForecasts.length === 0 && (
-                    <div className="text-slate-500 text-[11px] py-2">Click "Generate Predictions"</div>
+                    <div className="text-slate-500 text-[11px] py-2">
+                      {isLoadingPreds ? 'Generating predictions...' : 'Select a cell or refresh simulation'}
+                    </div>
                   )}
                 </div>
               </div>
@@ -543,13 +583,31 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                   Constrained Optimizer & Governance
                 </span>
               </div>
-              <button
-                onClick={handleGeneratePlan}
-                disabled={isGeneratingPlan}
-                className="px-3 py-1 bg-noc-cyan/20 hover:bg-noc-cyan/30 border border-noc-cyan/60 rounded text-xs font-mono font-medium text-noc-cyan disabled:opacity-40"
-              >
-                {isGeneratingPlan ? 'Optimizing...' : 'Generate New Plan'}
-              </button>
+              <div className="flex items-center gap-2">
+                {plans.length > 0 && (
+                  <select
+                    value={selectedPlan?.plan_id || ''}
+                    onChange={(e) => {
+                      const found = plans.find((p) => p.plan_id === e.target.value);
+                      if (found) setSelectedPlan(found);
+                    }}
+                    className="bg-noc-card border border-noc-border rounded px-2 py-1 text-[11px] font-mono text-slate-200"
+                  >
+                    {plans.map((p) => (
+                      <option key={p.plan_id} value={p.plan_id}>
+                        v{p.version ?? 1} · {p.plan_id.substring(0, 8)} ({p.status})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  onClick={handleGeneratePlan}
+                  disabled={isGeneratingPlan || !simState}
+                  className="px-3 py-1 bg-noc-cyan/20 hover:bg-noc-cyan/30 border border-noc-cyan/60 rounded text-xs font-mono font-medium text-noc-cyan disabled:opacity-40"
+                >
+                  {!simState ? 'Initializing...' : isGeneratingPlan ? 'Optimizing...' : 'Generate New Plan'}
+                </button>
+              </div>
             </div>
 
             {/* Operator Intent & Hard Constraints */}
@@ -557,9 +615,11 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">OPERATOR INTENT:</span>
                 <span className="text-slate-200 font-semibold truncate max-w-[240px]">
-                  {selectedPlan?.intent ||
-                    (realtimeData?.justification
-                      ? `Mitigate ${realtimeData.justification.spike_reason.substring(0, 30)} surge`
+                  {(typeof selectedPlan?.intent === 'string'
+                    ? selectedPlan.intent
+                    : (selectedPlan?.intent as any)?.goal) ||
+                    (realtimeData?.justification?.spike_reason
+                      ? `Mitigate ${String(realtimeData.justification.spike_reason).substring(0, 30)} surge`
                       : 'Mitigate event surge & preserve emergency SLA')}
                 </span>
               </div>
@@ -582,13 +642,13 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
             {/* Proposed Plan Actions Table */}
             <div className="mt-3">
               <div className="text-xs font-semibold text-slate-300 mb-2 flex items-center justify-between">
-                <span>Proposed Action Set ({selectedPlan?.actions.length || 0})</span>
+                <span>Proposed Action Set ({(selectedPlan?.actions || []).length})</span>
                 <Badge type="SIMULATED_ACTION" label={selectedPlan?.status || 'NO PLAN'} />
               </div>
 
-              {selectedPlan && selectedPlan.actions.length > 0 ? (
+              {selectedPlan && (selectedPlan.actions || []).length > 0 ? (
                 <div className="space-y-2 max-h-[220px] overflow-y-auto">
-                  {selectedPlan.actions.map((act) => (
+                  {(selectedPlan.actions || []).map((act) => (
                     <div
                       key={act.action_id}
                       className="p-2.5 rounded bg-noc-card border border-noc-border text-xs font-mono space-y-1"
@@ -596,7 +656,7 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-noc-cyan text-[11px]">{act.action_type}</span>
                         <span className="text-emerald-400 font-bold">
-                          +{act.offload_mbps || (act as any).amount || 65} Mbps Offload
+                          +{act.offload_mbps ?? (act as any).amount ?? 65} Mbps Offload
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-slate-400">
@@ -609,13 +669,13 @@ export const PredictionOrchestration: React.FC<PredictionOrchestrationProps> = (
                         </span>
                       </div>
                       <div className="flex items-center justify-between text-[9px] text-slate-500 pt-1 border-t border-noc-divider">
-                        <span>Expected Util Delta: {act.expected_delta_util_pct || -14.2}%</span>
-                        <span>Latency Delta: {act.expected_delta_latency_ms || -3.5} ms</span>
+                        <span>Expected Util Delta: {act.expected_delta_util_pct ?? -14.2}%</span>
+                        <span>Latency Delta: {act.expected_delta_latency_ms ?? -3.5} ms</span>
                       </div>
                     </div>
                   ))}
                 </div>
-              ) : realtimeData && realtimeData.load_distribution.length > 0 ? (
+              ) : realtimeData && Array.isArray(realtimeData.load_distribution) && realtimeData.load_distribution.length > 0 ? (
                 <div className="space-y-2 max-h-[220px] overflow-y-auto">
                   {realtimeData.load_distribution.map((vec, idx) => (
                     <div

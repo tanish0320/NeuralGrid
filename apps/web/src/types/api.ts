@@ -2,9 +2,19 @@ export type RiskBand = 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
 export type CellOperationalState = 'ACTIVE' | 'STANDBY' | 'FAILED' | 'DEGRADED';
 export type EventOrigin = 'SOURCE_DISCOVERED' | 'MANUAL_INPUT' | 'SEEDED_DEMO';
 export type VerificationStatus = 'UNVERIFIED' | 'SINGLE_SOURCE' | 'CORROBORATED' | 'MANUALLY_VERIFIED' | 'DEMO_SCENARIO';
-export type PlanStatus = 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'EXECUTED' | 'EXPIRED' | 'STALE';
-export type NodeState = 'DISCONNECTED' | 'STANDBY' | 'ACTIVATING' | 'ACTIVE' | 'DRAINING' | 'DEGRADED' | 'OFFLINE';
-export type TaskState = 'PENDING' | 'ASSIGNED' | 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'REJECTED' | 'EXPIRED';
+export type PlanStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'EXECUTING'
+  | 'COMPLETED'
+  | 'EXECUTED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'FAILED'
+  | 'STALE';
+export type NodeState = 'DISCONNECTED' | 'REGISTERING' | 'STANDBY' | 'ACTIVATING' | 'ACTIVE' | 'DRAINING' | 'DEGRADED' | 'OFFLINE' | 'ERROR';
+export type TaskState = 'PENDING' | 'ASSIGNED' | 'ACCEPTED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'REJECTED' | 'CANCELLED' | 'RETRY_PENDING' | 'EXPIRED';
 
 export interface HealthResponse {
   status: string;
@@ -260,16 +270,24 @@ export interface PlanAction {
 export interface PlanRecord {
   plan_id: string;
   simulation_id: string;
+  event_id?: string | null;
+  seed?: number;
+  version?: number;
   state_version: number;
   intent: string;
   status: PlanStatus;
+  solver_method?: string;
   objective_score: number;
+  objective?: any;
+  constraints_checked?: { name: string; passed: boolean; detail: string }[];
+  explanation?: string[];
   actions: PlanAction[];
   constraints_passed: boolean;
   constraint_violations: string[];
   rejection_reason: string | null;
   created_at: string;
   expires_at: string;
+  updated_at?: string;
 }
 
 export interface NodeRecord {
@@ -307,53 +325,83 @@ export interface TaskRecord {
   task_type: string;
   origin_node_id: string;
   assigned_node_id: string;
+  status: TaskState;
   state: TaskState;
-  payload_sha256: string;
+  payload_sha256?: string;
+  checksum: string | null;
   result_sha256: string | null;
+  result?: Record<string, any> | null;
+  retry_count?: number;
+  error_message?: string | null;
   created_at: string;
-  assigned_at: string | null;
-  started_at: string | null;
-  completed_at: string | null;
+  updated_at?: string;
+  assigned_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
   duration_ms: number | null;
-  verified: boolean;
+  verified?: boolean;
+}
+
+export interface SimulationBranchMetrics {
+  congested_cell_minutes: number;
+  peak_utilisation_pct: number;
+  simulated_latency_p50_ms: number;
+  simulated_latency_p95_ms: number;
+  simulated_latency_max_ms: number;
+  total_queued_mbps: number;
+  total_unserved_mbps: number;
+  total_energy_units: number;
+  action_count: number;
+}
+
+export interface TwinNodeExecutionMetrics {
+  tasks_total: number;
+  tasks_completed: number;
+  tasks_failed_or_pending: number;
+  avg_duration_ms: number;
+  total_retries: number;
+  executed_nodes: string[];
+  label: string;
 }
 
 export interface VerificationResponse {
   verification_id: string;
-  simulation_id: string;
+  baseline_run_id: string;
+  intervention_run_id: string;
   plan_id: string;
-  horizon_ticks: number;
+  event_id: string | null;
   seed: number;
-  baseline_metrics: {
-    total_congested_cell_minutes: number;
-    peak_utilisation_pct: number;
-    latency_p95_ms: number;
-    unserved_demand_mbit: number;
-    energy_units: number;
-  };
-  intervention_metrics: {
-    total_congested_cell_minutes: number;
-    peak_utilisation_pct: number;
-    latency_p95_ms: number;
-    unserved_demand_mbit: number;
-    energy_units: number;
-  };
-  deltas: {
-    congested_minutes_saved: number;
-    peak_util_delta_pct: number;
-    latency_p95_delta_ms: number;
-    unserved_demand_saved_mbit: number;
-  };
-  twinnode_metrics: {
-    tasks_dispatched: number;
-    tasks_completed: number;
-    total_compute_ms: number;
-    checksums_verified: boolean;
-  };
+  initial_state_version: number;
+  horizon_ticks: number;
+  config_match: boolean;
+  label: string;
+  baseline: SimulationBranchMetrics;
+  intervention: SimulationBranchMetrics;
+  deltas: Record<string, number>;
+  twinnode_metrics: TwinNodeExecutionMetrics;
+  created_at: string;
+}
+
+export interface SourceRegistryItem {
+  source_id: string;
+  platform: string;
+  display_name: string;
+  base_url: string;
+  connector_type: string;
+  enabled: boolean;
+  access_method: string;
+  refresh_interval_sec: number;
+  geographic_scope: string;
+  supported_categories: string[];
+  last_collected_at: string | null;
+  last_error: string | null;
+  health_status: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'AWAITING_CREDENTIALS' | 'DISABLED';
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AuditRecord {
-  id: number;
+  id: string;
   timestamp: string;
   actor: string;
   action: string;

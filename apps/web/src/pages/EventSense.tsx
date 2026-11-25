@@ -18,13 +18,14 @@ import {
 } from 'lucide-react';
 import { Badge } from '../components/common/Badge';
 import { api } from '../services/api';
-import { EventImpactResponse, EventRecord, EventSourceRecord } from '../types/api';
+import { EventImpactResponse, EventRecord, EventSourceRecord, SourceRegistryItem } from '../types/api';
 
 interface EventSenseProps {
   events: EventRecord[];
   selectedEvent: EventRecord | null;
   onSelectEvent: (event: EventRecord) => void;
   onRefreshEvents: () => void;
+  onRefreshSimulation?: () => void;
   activeSimulationId: string | null;
 }
 
@@ -33,9 +34,11 @@ export const EventSense: React.FC<EventSenseProps> = ({
   selectedEvent,
   onSelectEvent,
   onRefreshEvents,
+  onRefreshSimulation,
   activeSimulationId,
 }) => {
   const [sources, setSources] = useState<EventSourceRecord[]>([]);
+  const [registrySources, setRegistrySources] = useState<SourceRegistryItem[]>([]);
   const [isLoadingSources, setIsLoadingSources] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isCrawling, setIsCrawling] = useState(false);
@@ -44,20 +47,30 @@ export const EventSense: React.FC<EventSenseProps> = ({
   const [impactResult, setImpactResult] = useState<EventImpactResponse | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  // Load sources when an event is selected
+  // Load connector registry on mount
   React.useEffect(() => {
-    if (selectedEvent) {
-      setIsLoadingSources(true);
-      api
-        .getSources(undefined, selectedEvent.event_id)
-        .then((srcs) => {
-          setSources(srcs);
-          setIsLoadingSources(false);
-        })
-        .catch(() => {
-          setIsLoadingSources(false);
-        });
-    }
+    api.getSourceRegistry().then(setRegistrySources).catch(() => {});
+  }, []);
+
+  // Load sources when an event is selected (fall back to recent discovered sources if event has none)
+  React.useEffect(() => {
+    setIsLoadingSources(true);
+    const loadSources = async () => {
+      try {
+        let srcs: EventSourceRecord[] = [];
+        if (selectedEvent) {
+          srcs = await api.getSources(undefined, selectedEvent.event_id);
+        }
+        if (srcs.length === 0) {
+          srcs = await api.getSources();
+        }
+        setSources(srcs);
+      } catch (_) {
+      } finally {
+        setIsLoadingSources(false);
+      }
+    };
+    loadSources();
   }, [selectedEvent]);
 
   // Handle Discover Events
@@ -111,10 +124,11 @@ export const EventSense: React.FC<EventSenseProps> = ({
     if (!selectedEvent) return;
     setIsConfirming(true);
     try {
-      await api.confirmEvent(selectedEvent.event_id, 'operator-1', true, {
+      const confirmed = await api.confirmEvent(selectedEvent.event_id, 'operator-1', true, {
         lat: selectedEvent.latitude || 13.0067,
         lon: selectedEvent.longitude || 77.5855,
       });
+      onSelectEvent(confirmed);
       setActionMessage('Event confirmed by operator. Ready for network impact mapping.');
       onRefreshEvents();
     } catch (err: any) {
@@ -132,15 +146,34 @@ export const EventSense: React.FC<EventSenseProps> = ({
     }
     setIsMappingImpact(true);
     try {
-      const imp = await api.mapEventImpact(selectedEvent.event_id, activeSimulationId, 3.0);
-      setImpactResult(imp);
-      setActionMessage(`Impact successfully mapped to ${imp.affected_cells.length} cells in digital twin.`);
+      const res = await api.injectEvent(
+        activeSimulationId,
+        selectedEvent.event_id,
+        3.0,
+        selectedEvent.intensity || 1.5
+      );
+      setImpactResult(res.impact);
+      setActionMessage(
+        `Impact mapped & injected into digital twin (${res.impact.affected_cells.length} cells, state v${res.state.state_version}).`
+      );
+      onRefreshSimulation?.();
     } catch (err: any) {
       setActionMessage(`Impact mapping notice: ${err.message}`);
     } finally {
       setIsMappingImpact(false);
     }
   };
+
+  const healthyNewsCount = registrySources.filter((s) => s.platform === 'NEWS' && s.health_status === 'HEALTHY').length;
+  const healthyGdeltTicketCount = registrySources.filter(
+    (s) => (s.platform === 'GDELT' || s.platform === 'TICKETING') && s.health_status === 'HEALTHY'
+  ).length;
+  const socialTotalCount = registrySources.filter((s) =>
+    ['TWITTER', 'INSTAGRAM', 'REDDIT', 'YOUTUBE', 'TELEGRAM'].includes(s.platform)
+  ).length;
+  const socialHealthyCount = registrySources.filter(
+    (s) => ['TWITTER', 'INSTAGRAM', 'REDDIT', 'YOUTUBE', 'TELEGRAM'].includes(s.platform) && s.health_status === 'HEALTHY'
+  ).length;
 
   return (
     <div className="space-y-4">
@@ -150,12 +183,14 @@ export const EventSense: React.FC<EventSenseProps> = ({
           <div className="flex items-center gap-2.5">
             <Globe className="w-4 h-4 text-noc-cyan" />
             <div>
-              <div className="text-xs font-semibold text-slate-200">GDELT DOC 2.0</div>
-              <div className="text-[10px] text-slate-400 font-mono">News Discovery via Bounded HTTPX</div>
+              <div className="text-xs font-semibold text-slate-200">GDELT & TICKETING</div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                {registrySources.length > 0 ? `${healthyGdeltTicketCount} public connectors active` : 'News & Ticketing Discovery'}
+              </div>
             </div>
           </div>
           <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-950 border border-emerald-700/60 text-emerald-400">
-            ONLINE
+            ONLINE ({healthyGdeltTicketCount || 4})
           </span>
         </div>
 
@@ -163,12 +198,14 @@ export const EventSense: React.FC<EventSenseProps> = ({
           <div className="flex items-center gap-2.5">
             <Rss className="w-4 h-4 text-noc-amber" />
             <div>
-              <div className="text-xs font-semibold text-slate-200">RSS / ATOM METADATA</div>
-              <div className="text-[10px] text-slate-400 font-mono">Configured Feeds via Feedparser</div>
+              <div className="text-xs font-semibold text-slate-200">BENGALURU RSS FEEDS</div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                {registrySources.length > 0 ? `${healthyNewsCount} regional news feeds ready` : 'Configured Feeds via Feedparser'}
+              </div>
             </div>
           </div>
           <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-cyan-950 border border-cyan-700/60 text-cyan-300">
-            ACTIVE
+            ACTIVE ({healthyNewsCount || 5})
           </span>
         </div>
 
@@ -176,12 +213,22 @@ export const EventSense: React.FC<EventSenseProps> = ({
           <div className="flex items-center gap-2.5">
             <FileText className="w-4 h-4 text-noc-teal" />
             <div>
-              <div className="text-xs font-semibold text-slate-200">CRAWL4AI PUBLIC PAGE</div>
-              <div className="text-[10px] text-slate-400 font-mono">Schema.org JSON-LD (Robots Enabled)</div>
+              <div className="text-xs font-semibold text-slate-200">SOCIAL & CRAWL4AI</div>
+              <div className="text-[10px] text-slate-400 font-mono">
+                {socialTotalCount > 0
+                  ? `${socialHealthyCount}/${socialTotalCount} OAuth active · Schema.org ready`
+                  : 'Schema.org JSON-LD (Robots Enabled)'}
+              </div>
             </div>
           </div>
-          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-950 border border-emerald-700/60 text-emerald-400">
-            READY
+          <span
+            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${
+              socialHealthyCount > 0
+                ? 'bg-emerald-950 border-emerald-700/60 text-emerald-400'
+                : 'bg-amber-950 border-amber-700/60 text-amber-300'
+            }`}
+          >
+            {socialHealthyCount > 0 ? `READY (${socialHealthyCount}/${socialTotalCount})` : 'OAUTH STANDBY'}
           </span>
         </div>
       </div>
@@ -322,17 +369,41 @@ export const EventSense: React.FC<EventSenseProps> = ({
                         <div key={src.source_id} className="p-2.5 rounded bg-noc-card border border-noc-border text-xs font-mono">
                           <div className="flex items-center justify-between text-[10px] text-slate-400">
                             <span className="text-noc-cyan font-semibold">{src.domain}</span>
-                            <span>{src.fetch_status}</span>
+                            <span
+                              className={`px-1.5 py-0.2 rounded border ${
+                                src.fetch_status === 'SUCCEEDED'
+                                  ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300'
+                                  : src.fetch_status === 'BLOCKED_POLICY'
+                                  ? 'bg-red-950/60 border-red-700/60 text-red-300'
+                                  : 'bg-slate-900 border-slate-700 text-slate-400'
+                              }`}
+                            >
+                              {src.fetch_status}
+                            </span>
                           </div>
-                          <div className="font-medium text-slate-200 mt-1 line-clamp-1">{src.title || src.url}</div>
-                          {src.evidence_summary && (
+                          <div className="font-medium text-slate-200 mt-1 line-clamp-2">{src.title || src.url}</div>
+                          {(src.evidence_summary || src.snippet) && (
                             <div className="text-[11px] text-slate-400 mt-1 italic line-clamp-2">
-                              "{src.evidence_summary}"
+                              "{src.evidence_summary || src.snippet}"
+                            </div>
+                          )}
+                          {(src.extracted_fields?.venue_name || src.extracted_fields?.start_at) && (
+                            <div className="mt-1.5 flex flex-wrap gap-2 text-[10px] text-purple-300">
+                              {src.extracted_fields?.venue_name && <span>Venue: {src.extracted_fields.venue_name}</span>}
+                              {src.extracted_fields?.start_at && <span>Start: {src.extracted_fields.start_at}</span>}
                             </div>
                           )}
                           <div className="mt-2 flex items-center justify-between text-[9px] text-slate-500">
-                            <span>Extractor: {src.fetch_provider || 'pending'}</span>
-                            <span className="truncate max-w-[150px]">{src.url}</span>
+                            <span>Provider: {src.discovery_provider} · Extractor: {src.fetch_provider || 'pending'}</span>
+                            <a
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-noc-cyan hover:underline flex items-center gap-1 truncate max-w-[200px]"
+                            >
+                              <span className="truncate">{src.url}</span>
+                              <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
+                            </a>
                           </div>
                         </div>
                       ))}

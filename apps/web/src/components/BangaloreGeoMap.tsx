@@ -299,13 +299,14 @@ export const BangaloreGeoMap: React.FC<BangaloreGeoMapProps> = ({
         );
       });
     }
+  }, [cells, surgeTower, mitigatingTowers, loadVectors, venueLocation, cellImpacts, cellOverlaps, filterMode, selectedCellId, onSelectCell]);
 
-    // Auto-fit bounds if surge tower is active
-    if (surgeTower) {
-      const surgeCoords = [surgeTower.lat, surgeTower.lon] as [number, number];
-      map.setView(surgeCoords, 13, { animate: true });
+  // Center map only when the active surge epicenter changes (so clicking cells doesn't snap camera back)
+  useEffect(() => {
+    if (mapInstanceRef.current && surgeTower) {
+      mapInstanceRef.current.setView([surgeTower.lat, surgeTower.lon], 13, { animate: true });
     }
-  }, [cells, surgeTower, mitigatingTowers, loadVectors, venueLocation, filterMode, selectedCellId, onSelectCell]);
+  }, [surgeTower?.cell_id]);
 
   const handleResetView = () => {
     if (mapInstanceRef.current) {

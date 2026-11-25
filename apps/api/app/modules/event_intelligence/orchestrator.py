@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid4
@@ -19,8 +20,11 @@ from apps.api.app.core.url_policy import (
     validate_public_https_url,
     validate_redirect_url,
 )
+from apps.api.app.modules.event_intelligence.relevance import score_crowd_relevance
 from apps.api.app.repositories.event_sources import EventSourceRepository
 from apps.api.app.repositories.events import EventRepository
+
+logger = logging.getLogger("neuralgrid.eventsense.orchestrator")
 from apps.api.app.schemas.events import (
     CrawlPageResult,
     CrawlRequest,
@@ -168,12 +172,12 @@ class EventIntelligenceOrchestrator:
                     {"run_id": str(run_id), **summary.model_dump(mode="json")},
                 )
         else:
+            all_providers: list[Any] = []
             try:
                 service_result = await service.discover_candidates(request)
                 warnings.extend(service_result.warnings)
-                by_provider = {p.provider: p for p in service_result.providers}
+                all_providers = list(service_result.providers)
             except Exception as exc:
-                by_provider = {}
                 warnings.append(f"Collector service raised an unexpected error: {type(exc).__name__}")
                 for prov in request.enabled_providers:
                     provider_summaries.append(
@@ -187,11 +191,20 @@ class EventIntelligenceOrchestrator:
                         )
                     )
 
-            if by_provider or not provider_summaries:
+            if all_providers or not provider_summaries:
                 allowed = self.settings.allowed_domains_set
+                matched_provider_keys: set[str] = set()
+                matched_results_list: list[Any] = []
+
                 for prov in request.enabled_providers:
-                    p_res = by_provider.get(prov)
-                    if p_res is None:
+                    matched_for_prov = [
+                        p
+                        for p in all_providers
+                        if p.provider == prov
+                        or p.provider.startswith(f"src_{prov}")
+                        or prov in p.provider
+                    ]
+                    if not matched_for_prov:
                         summary = ProviderRunSummary(
                             provider=prov,
                             status="SKIPPED",
@@ -206,7 +219,12 @@ class EventIntelligenceOrchestrator:
                             {"run_id": str(run_id), **summary.model_dump(mode="json")},
                         )
                         continue
+                    for p_res in matched_for_prov:
+                        if p_res.provider not in matched_provider_keys:
+                            matched_provider_keys.add(p_res.provider)
+                            matched_results_list.append(p_res)
 
+                for p_res in matched_results_list:
                     persisted_for_provider = 0
                     for candidate in p_res.items[: request.max_candidates]:
                         raw_url = str(candidate.url)
@@ -564,6 +582,16 @@ class EventIntelligenceOrchestrator:
         fields = extraction.fields or {}
         name = (fields.get("event_name") or fields.get("name") or source.title or "").strip()
         if not name:
+            return None
+
+        rel = score_crowd_relevance(
+            name,
+            f"{fields.get('venue_name') or ''} {extraction.evidence_summary or ''}",
+            source.domain,
+            source.source_type,
+        )
+        if not rel.is_relevant:
+            logger.info("Skipping non-crowd/irrelevant article '%s' (%s)", name, rel.rejection_reason)
             return None
 
         # Delegate to CanonicalEventResolver if configured

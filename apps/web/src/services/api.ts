@@ -12,6 +12,7 @@ import {
   PredictionsResponse,
   RealtimeScanResponse,
   SimulationStateResponse,
+  SourceRegistryItem,
   TaskRecord,
   VerificationResponse,
   EventImpactSummary,
@@ -68,9 +69,49 @@ function normalizePlan(plan: any): PlanRecord {
         typeof act.expected_delta_latency_ms === 'number' ? act.expected_delta_latency_ms : -3.5,
     };
   });
+  const constraints = plan.constraints_checked || [];
+  const constraintsPassed =
+    typeof plan.constraints_passed === 'boolean'
+      ? plan.constraints_passed
+      : constraints.length === 0 || constraints.every((c: any) => Boolean(c.passed));
+
   return {
     ...plan,
+    version: typeof plan.version === 'number' ? plan.version : 1,
+    intent:
+      typeof plan.intent === 'string'
+        ? plan.intent
+        : plan.intent?.goal || 'Mitigate event surge & preserve emergency SLA',
+    objective_score:
+      typeof plan.objective_score === 'number'
+        ? plan.objective_score
+        : plan.objective?.after_projected?.total_score ?? 0,
+    constraints_passed: constraintsPassed,
+    constraint_violations:
+      plan.constraint_violations ||
+      constraints.filter((c: any) => !c.passed).map((c: any) => c.name || c.detail),
     actions,
+  };
+}
+
+function normalizeTask(task: any): TaskRecord {
+  if (!task) return task;
+  const status = task.status || task.state || 'PENDING';
+  const checksum = task.checksum ?? task.result_sha256 ?? null;
+  const durationMs =
+    typeof task.result?.duration_ms === 'number'
+      ? task.result.duration_ms
+      : typeof task.duration_ms === 'number'
+      ? task.duration_ms
+      : null;
+  return {
+    ...task,
+    status,
+    state: status,
+    checksum,
+    result_sha256: checksum,
+    duration_ms: durationMs,
+    verified: Boolean(checksum && status === 'COMPLETED'),
   };
 }
 
@@ -82,7 +123,7 @@ export const api = {
   seedNetwork: (seed = 42, cellCount = 100) =>
     fetchJson<NetworkResponse>('/api/v1/networks/seed', {
       method: 'POST',
-      body: JSON.stringify({ seed, cell_count: cellCount, force: true }),
+      body: JSON.stringify({ seed, cell_count: cellCount }),
     }),
   getCurrentNetwork: () => fetchJson<NetworkResponse>('/api/v1/networks/current'),
   getCurrentCells: async () => {
@@ -157,22 +198,26 @@ export const api = {
       body: JSON.stringify({ seed }),
     }),
   getSimulationState: (simId: string) => fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/state`),
-  stepSimulation: (simId: string, steps = 1) =>
-    fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/step`, {
-      method: 'POST',
-      body: JSON.stringify({ steps }),
-    }),
+  stepSimulation: async (simId: string, steps = 1) => {
+    let latest!: SimulationStateResponse;
+    const count = Math.max(1, steps);
+    for (let i = 0; i < count; i += 1) {
+      latest = await fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/step`, {
+        method: 'POST',
+      });
+    }
+    return latest;
+  },
   pauseSimulation: (simId: string) =>
     fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/pause`, { method: 'POST' }),
   resumeSimulation: (simId: string) =>
     fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/start`, { method: 'POST' }),
-  resetSimulation: (simId: string, seed = 42) =>
+  resetSimulation: (simId: string) =>
     fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/reset`, {
       method: 'POST',
-      body: JSON.stringify({ seed }),
     }),
   injectEvent: (simId: string, eventId: string, radiusKm = 3.0, intensity = 1.5) =>
-    fetchJson<SimulationStateResponse>(`/api/v1/simulations/${simId}/events`, {
+    fetchJson<{ state: SimulationStateResponse; impact: EventImpactResponse }>(`/api/v1/simulations/${simId}/events`, {
       method: 'POST',
       body: JSON.stringify({
         event_id: eventId,
@@ -303,12 +348,12 @@ export const api = {
     const raw = await fetchJson<any[]>(`/api/v1/plans${q}`);
     return (raw || []).map(normalizePlan);
   },
-  approvePlan: async (planId: string, stateVersion: number, operatorId = 'operator-1') => {
+  approvePlan: async (planId: string, stateVersion: number, operatorId = 'operator-1', planVersion = 1) => {
     const raw = await fetchJson<any>(`/api/v1/plans/${planId}/approve`, {
       method: 'POST',
       body: JSON.stringify({
         operator_id: operatorId,
-        plan_version: 1,
+        plan_version: planVersion,
         state_version: stateVersion,
         notes: 'Approved for event surge capacity offload',
       }),
@@ -335,7 +380,9 @@ export const api = {
     });
     return {
       plan: normalizePlan(raw.plan),
-      simulation_state: raw.simulation_state,
+      new_simulation_state_version: raw.new_simulation_state_version,
+      dispatched_task_ids: raw.dispatched_task_ids || [],
+      message: raw.message,
     };
   },
 
@@ -376,8 +423,8 @@ export const api = {
     fetchJson<NodeRecord>(`/api/v1/nodes/${nodeId}/standby`, { method: 'POST' }),
   drainNode: (nodeId: string) =>
     fetchJson<NodeRecord>(`/api/v1/nodes/${nodeId}/drain`, { method: 'POST' }),
-  dispatchTask: (taskType: string, assignedNodeId: string, seed = 42, payload?: any) =>
-    fetchJson<TaskRecord>('/api/v1/tasks', {
+  dispatchTask: async (taskType: string, assignedNodeId: string, seed = 42, payload?: any) => {
+    const raw = await fetchJson<any>('/api/v1/tasks', {
       method: 'POST',
       body: JSON.stringify({
         idempotency_key: `task-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -387,10 +434,13 @@ export const api = {
         seed,
         payload: payload || { cells: 100, horizons: [15, 30] },
       }),
-    }),
-  getTasks: (nodeId?: string) => {
+    });
+    return normalizeTask(raw);
+  },
+  getTasks: async (nodeId?: string) => {
     const q = nodeId ? `?node_id=${nodeId}` : '';
-    return fetchJson<TaskRecord[]>(`/api/v1/tasks${q}`);
+    const raw = await fetchJson<any[]>(`/api/v1/tasks${q}`);
+    return (raw || []).map(normalizeTask);
   },
 
   // Verification & Audit
@@ -403,7 +453,29 @@ export const api = {
         horizon_ticks: horizonTicks,
       }),
     }),
+  getVerifications: (planId?: string) => {
+    const q = planId ? `?plan_id=${planId}` : '';
+    return fetchJson<VerificationResponse[]>(`/api/v1/verification${q}`);
+  },
   getAuditLogs: (limit = 100) => fetchJson<AuditRecord[]>(`/api/v1/audit?limit=${limit}`),
+
+  // EventSense Source Registry
+  getSourceRegistry: (platform?: string, enabledOnly = false) => {
+    const q = new URLSearchParams();
+    if (platform) q.set('platform', platform);
+    if (enabledOnly) q.set('enabled_only', 'true');
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<SourceRegistryItem[]>(`/api/v1/event-intelligence/sources/registry${qs}`);
+  },
+  testSourceConnector: (sourceId: string) =>
+    fetchJson<{
+      source_id: string;
+      connector_type: string;
+      health_status: string;
+      message: string;
+      last_check_at: string;
+      latency_ms?: number | null;
+    }>(`/api/v1/event-intelligence/sources/registry/${sourceId}/test`, { method: 'POST' }),
 
   // Geospatial Event-to-Cell Impact Assessment (Phase 5)
   getImpactEvents: (params?: { category?: string; status?: string }) => {

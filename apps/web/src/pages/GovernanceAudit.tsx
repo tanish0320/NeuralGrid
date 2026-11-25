@@ -142,7 +142,7 @@ export const GovernanceAudit: React.FC = () => {
           {selectedLog ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-noc-border">
-                <span className="text-xs font-bold font-mono text-slate-200">Audit Record #{selectedLog.id}</span>
+                <span className="text-xs font-bold font-mono text-slate-200">Audit Record #{String(selectedLog.id).substring(0, 8)}</span>
                 <Badge type="PUBLIC_SOURCE" label="LOG ENTRY" />
               </div>
 

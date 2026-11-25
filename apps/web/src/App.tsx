@@ -39,16 +39,27 @@ export const App: React.FC = () => {
   // WebSocket message handler
   const handleWsMessage = useCallback((msg: WebSocketMessage) => {
     if (msg.event === 'tick.updated' && msg.data) {
-      if (Array.isArray(msg.data.telemetry) && msg.data.telemetry.length > 0) {
+      if (Array.isArray(msg.data.telemetry) && msg.data.telemetry.length > 0 && msg.data.sim_time_utc) {
         setSimState(msg.data);
       } else {
-        // Retain existing telemetry array if WS broadcast only transmits delta/summary
-        setSimState((prev) => (prev ? { ...prev, ...msg.data, telemetry: prev.telemetry || [] } : msg.data));
+        // Retain existing telemetry array and sim_time_utc if WS broadcast only transmits delta/summary
+        setSimState((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...msg.data,
+                telemetry: prev.telemetry || [],
+                sim_time_utc: msg.data.sim_time_utc || prev.sim_time_utc,
+              }
+            : null
+        );
       }
     } else if (msg.event.startsWith('event.')) {
       refreshEvents();
     } else if (msg.event.startsWith('node.')) {
       refreshNodes();
+    } else if (msg.event.startsWith('plan.')) {
+      refreshPlans();
     }
   }, []);
 
@@ -61,32 +72,24 @@ export const App: React.FC = () => {
       setHealth(h);
       setIsBackendConnected(true);
 
-      // Load network cells and graph
-      const cellData = await api.getCurrentCells();
+      // Load remaining dashboard state in parallel so simState is ready immediately
+      const [cellData, graph, sim, evList, nodeData, planData] = await Promise.all([
+        api.getCurrentCells(),
+        api.getCurrentGraph(),
+        api.createSimulation(42).catch(() => null),
+        api.getEvents(),
+        api.getNodes(),
+        api.getPlans(),
+      ]);
+
       setCells(cellData.cells);
-
-      const graph = await api.getCurrentGraph();
       setGraphData(graph);
-
-      // Load or create initial simulation
-      try {
-        const sim = await api.createSimulation(42);
-        setSimState(sim);
-      } catch (_) {}
-
-      // Load events
-      const evList = await api.getEvents();
+      if (sim) setSimState(sim);
       setEvents(evList);
       if (evList.length > 0) {
         setSelectedEvent(evList[0]);
       }
-
-      // Load nodes
-      const nodeData = await api.getNodes();
       setNodes(nodeData);
-
-      // Load plans
-      const planData = await api.getPlans();
       setPlans(planData);
     } catch (_) {
       setIsBackendConnected(false);
@@ -111,9 +114,13 @@ export const App: React.FC = () => {
     try {
       const evList = await api.getEvents();
       setEvents(evList);
-      if (evList.length > 0 && !selectedEvent) {
-        setSelectedEvent(evList[0]);
-      }
+      setSelectedEvent((prev) => {
+        if (prev) {
+          const updated = evList.find((e) => e.event_id === prev.event_id);
+          if (updated) return updated;
+        }
+        return evList.length > 0 ? evList[0] : prev;
+      });
     } catch (_) {}
   };
 
@@ -121,6 +128,14 @@ export const App: React.FC = () => {
     try {
       const nodeData = await api.getNodes();
       setNodes(nodeData);
+    } catch (_) {}
+  };
+
+  const refreshPlans = async (simId?: string) => {
+    try {
+      const targetSimId = simId || simState?.simulation_id;
+      const planData = await api.getPlans(targetSimId);
+      setPlans(planData);
     } catch (_) {}
   };
 
@@ -143,6 +158,7 @@ export const App: React.FC = () => {
       setSimState(newSim);
       await refreshEvents();
       await refreshNodes();
+      await refreshPlans(newSim.simulation_id);
       const cellData = await api.getCurrentCells();
       setCells(cellData.cells);
       const graph = await api.getCurrentGraph();
@@ -166,7 +182,7 @@ export const App: React.FC = () => {
       onResetDemo={handleResetDemo}
       isResetting={isResetting}
     >
-      <ErrorBoundary fallbackScreen={() => setCurrentScreen('command')}>
+      <ErrorBoundary key={currentScreen} fallbackScreen={() => setCurrentScreen('command')}>
         {currentScreen === 'command' && (
           <CommandCentre
             cells={cells}
@@ -175,6 +191,8 @@ export const App: React.FC = () => {
             nodes={nodes}
             onSelectScreen={setCurrentScreen}
             onSelectCell={setSelectedCellId}
+            onRefreshSimulation={refreshSimulation}
+            onRefreshEvents={refreshEvents}
           />
         )}
 
@@ -184,6 +202,7 @@ export const App: React.FC = () => {
             selectedEvent={selectedEvent}
             onSelectEvent={setSelectedEvent}
             onRefreshEvents={refreshEvents}
+            onRefreshSimulation={refreshSimulation}
             activeSimulationId={simState?.simulation_id || null}
           />
         )}
@@ -206,6 +225,7 @@ export const App: React.FC = () => {
             selectedCellId={selectedCellId}
             onSelectCell={setSelectedCellId}
             onRefreshSimulation={refreshSimulation}
+            onRefreshPlans={() => refreshPlans(simState?.simulation_id)}
             onSelectScreen={setCurrentScreen}
           />
         )}
@@ -221,6 +241,7 @@ export const App: React.FC = () => {
           <Verification
             simState={simState}
             plans={plans}
+            onRefreshPlans={() => refreshPlans(simState?.simulation_id)}
           />
         )}
 

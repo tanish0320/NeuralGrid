@@ -34,7 +34,7 @@ export const LoadSplittingJustificationPanel: React.FC<LoadSplittingJustificatio
   className = '',
   onSelectTower,
 }) => {
-  if (!surgeTower || !justification) {
+  if (!surgeTower || !justification || !justification.traffic_breakdown || !justification.hard_constraints) {
     return (
       <div className={`bg-noc-surface border border-noc-border rounded-lg p-6 text-center ${className}`}>
         <Radio className="w-8 h-8 text-slate-500 mx-auto mb-2 animate-pulse" />

@@ -61,8 +61,10 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   const [regionFilter, setRegionFilter] = useState<string>('ALL');
   const [isPlaying, setIsPlaying] = useState<boolean>(simState?.status === 'RUNNING');
   const [isStepping, setIsStepping] = useState<boolean>(false);
-  const [faultCellId, setFaultCellId] = useState<string>('CELL-BLR-018');
+  const [faultCellId, setFaultCellId] = useState<string>(selectedCellId || 'CELL-BLR-018');
+  const [faultType, setFaultType] = useState<'CELL_FAILURE' | 'BACKHAUL_CONGESTION'>('CELL_FAILURE');
   const [showFaultModal, setShowFaultModal] = useState<boolean>(false);
+  const [twinNotice, setTwinNotice] = useState<string | null>(null);
   const [viewFormat, setViewFormat] = useState<'GEOMAP' | 'CYTOSCAPE'>('GEOMAP');
   const [surgeTower, setSurgeTower] = useState<SurgeTower | null>(null);
   const [mitigatingTowers, setMitigatingTowers] = useState<MitigatingTower[]>([]);
@@ -131,8 +133,13 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   const safeTelemetry = Array.isArray(simState?.telemetry) ? simState.telemetry : [];
   const selectedTelemetry = safeTelemetry.find((t) => t.cell_id === selectedCellId);
 
-  // Initialize Cytoscape
   useEffect(() => {
+    setIsPlaying(simState?.status === 'RUNNING');
+  }, [simState?.status]);
+
+  // Initialize Cytoscape when Cytoscape view is active
+  useEffect(() => {
+    if (viewFormat !== 'CYTOSCAPE') return;
     const safeNodes = Array.isArray(graphData?.nodes) ? graphData.nodes : [];
     const safeEdges = Array.isArray(graphData?.edges) ? graphData.edges : [];
     if (!containerRef.current || safeNodes.length === 0) return;
@@ -235,7 +242,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
           },
         },
         {
-          selector: 'edge[type = "BACKHAUL_CLUSTER"]',
+          selector: 'edge[type = "shared_backhaul"], edge[type = "BACKHAUL_CLUSTER"]',
           style: {
             'line-color': '#0891B2',
             width: 2,
@@ -267,12 +274,13 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
 
     return () => {
       cy.destroy();
+      cyRef.current = null;
     };
-  }, [graphData]);
+  }, [graphData, viewFormat]);
 
   // Update Cytoscape styles dynamically as telemetry changes
   useEffect(() => {
-    if (!cyRef.current || !simState) return;
+    if (viewFormat !== 'CYTOSCAPE' || !cyRef.current || !simState) return;
     const cy = cyRef.current;
 
     const telList = simState.telemetry || [];
@@ -305,7 +313,7 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
         cy.edges(`[source = "${selectedCellId}"], [target = "${selectedCellId}"]`).addClass('highlighted');
       }
     });
-  }, [simState, selectedCellId]);
+  }, [simState, selectedCellId, viewFormat]);
 
   // Handle Play/Pause
   const handleTogglePlay = async () => {
@@ -314,12 +322,16 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
       if (isPlaying) {
         await api.pauseSimulation(simState.simulation_id);
         setIsPlaying(false);
+        setTwinNotice('Simulation paused.');
       } else {
         await api.resumeSimulation(simState.simulation_id);
         setIsPlaying(true);
+        setTwinNotice('Simulation running.');
       }
       onRefreshSimulation();
-    } catch (_) {}
+    } catch (err: any) {
+      setTwinNotice(`Simulation control error: ${err.message}`);
+    }
   };
 
   // Handle Step (+5m tick)
@@ -329,6 +341,8 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
     try {
       await api.stepSimulation(simState.simulation_id, 1);
       onRefreshSimulation();
+    } catch (err: any) {
+      setTwinNotice(`Step failed: ${err.message}`);
     } finally {
       setIsStepping(false);
     }
@@ -338,10 +352,13 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
   const handleInjectFault = async () => {
     if (!simState) return;
     try {
-      await api.injectFault(simState.simulation_id, faultCellId, 'CELL_FAILURE', 1.0);
+      await api.injectFault(simState.simulation_id, faultCellId.trim(), faultType, 1.0);
       setShowFaultModal(false);
+      setTwinNotice(`Injected ${faultType} fault on ${faultCellId.trim()}.`);
       onRefreshSimulation();
-    } catch (_) {}
+    } catch (err: any) {
+      setTwinNotice(`Fault injection failed: ${err.message}`);
+    }
   };
 
   return (
@@ -406,7 +423,10 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
           </button>
 
           <button
-            onClick={() => setShowFaultModal(true)}
+            onClick={() => {
+              if (selectedCellId) setFaultCellId(selectedCellId);
+              setShowFaultModal(true);
+            }}
             className="px-2.5 py-1 bg-red-950/70 hover:bg-red-900 border border-red-700/60 rounded text-[11px] font-mono text-red-300 flex items-center gap-1"
           >
             <AlertOctagon className="w-3 h-3" />
@@ -414,6 +434,13 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
           </button>
         </div>
       </div>
+
+      {twinNotice && (
+        <div className="bg-noc-card/90 border border-noc-border px-3 py-1.5 rounded flex items-center justify-between text-[11px] font-mono text-noc-cyan">
+          <span>{twinNotice}</span>
+          <button onClick={() => setTwinNotice(null)} className="text-slate-400 hover:text-slate-200">✕</button>
+        </div>
+      )}
 
       {recalcSummary && (
         <div className="bg-noc-card/90 border border-noc-cyan/40 px-3 py-1.5 rounded flex items-center justify-between text-[11px] font-mono text-noc-cyan">
@@ -762,7 +789,11 @@ export const NetworkTwin: React.FC<NetworkTwinProps> = ({
               </div>
               <div>
                 <label className="text-slate-400 block mb-1">Fault Type:</label>
-                <select className="w-full bg-noc-card border border-noc-border rounded px-2.5 py-1.5 text-slate-100 font-mono">
+                <select
+                  value={faultType}
+                  onChange={(e) => setFaultType(e.target.value as 'CELL_FAILURE' | 'BACKHAUL_CONGESTION')}
+                  className="w-full bg-noc-card border border-noc-border rounded px-2.5 py-1.5 text-slate-100 font-mono"
+                >
                   <option value="CELL_FAILURE">CELL_FAILURE (Hard Outage)</option>
                   <option value="BACKHAUL_CONGESTION">BACKHAUL_CONGESTION (High RTT)</option>
                 </select>

@@ -41,6 +41,8 @@ interface CommandCentreProps {
   nodes: NodeRecord[];
   onSelectScreen: (screen: any) => void;
   onSelectCell: (cellId: string) => void;
+  onRefreshSimulation?: () => void;
+  onRefreshEvents?: () => void;
 }
 
 export const CommandCentre: React.FC<CommandCentreProps> = ({
@@ -50,6 +52,8 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
   nodes,
   onSelectScreen,
   onSelectCell,
+  onRefreshSimulation,
+  onRefreshEvents,
 }) => {
   const summary = simState?.summary;
   const telemetry = simState?.telemetry || [];
@@ -79,6 +83,8 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
           `Discovered ${res.events.length} live Bengaluru events. Epicenter identified at ${res.surge_tower.locality} (${res.surge_tower.cell_id}).`
         );
       }
+      onRefreshSimulation?.();
+      onRefreshEvents?.();
     } catch (err: any) {
       setScanMessage(`Real-time scan notice: ${err.message}`);
     } finally {
@@ -86,12 +92,26 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
     }
   };
 
-  // Run initial real-time scan on mount if not yet loaded
+  // Run lightweight read-only preview on mount once simState is ready (full live crawl on explicit button click)
   useEffect(() => {
-    if (!surgeTower) {
-      handleRealtimeScan();
+    if (!surgeTower && simState?.simulation_id) {
+      api
+        .realtimeScan('Bengaluru', false, simState.simulation_id)
+        .then((res) => {
+          if (res.surge_tower) {
+            setSurgeTower(res.surge_tower);
+            setMitigatingTowers(res.mitigating_towers);
+            setLoadVectors(res.load_distribution);
+            setJustification(res.justification);
+            setDiscoveredEvents(res.events);
+            setScanMessage(
+              `Loaded ${res.events.length} Bengaluru events (${res.discovered_sources_count} scraped sources). Epicenter: ${res.surge_tower.locality} (${res.surge_tower.cell_id}).`
+            );
+          }
+        })
+        .catch(() => {});
     }
-  }, []);
+  }, [simState?.simulation_id]);
 
   // Group cells at risk
   const telemetryByCell = new Map<string, CellTelemetryRecord>(
@@ -337,7 +357,7 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
                     <div>
                       <span className="text-slate-500 block text-[10px]">PEAK UPLIFT:</span>
                       <span className="text-purple-300 font-semibold">
-                        +{justification?.traffic_breakdown.surge_uplift_mbps || 580} Mbps
+                        +{justification?.traffic_breakdown?.surge_uplift_mbps ?? 580} Mbps
                       </span>
                     </div>
                   </div>
@@ -465,10 +485,10 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
 
               {/* 10x10 Cell Grid Representation */}
               <div className="grid grid-cols-10 gap-1.5 p-3 bg-noc-bg/80 border border-noc-border/60 rounded-lg">
-                {cells.map((cell, idx) => {
+                {cells.map((cell) => {
                   const tel = telemetryByCell.get(cell.cell_id);
                   const util = typeof tel?.utilisation_pct === 'number' ? tel.utilisation_pct : (cell.capacity_mbps > 800 ? 55 : 45);
-                  const isEventImpacted = idx >= 15 && idx <= 26;
+                  const isEventImpacted = (tel?.event_demand_mbps ?? 0) > 0 || cell.cell_id === surgeTower?.cell_id;
 
                   let cellBg = 'bg-emerald-950/70 border-emerald-700/60 text-emerald-300';
                   if (util >= 85) {
@@ -503,9 +523,15 @@ export const CommandCentre: React.FC<CommandCentreProps> = ({
               <div className="mt-3 flex items-center justify-between text-[11px] font-mono text-slate-400 bg-noc-surface/60 p-2 rounded border border-noc-border/40">
                 <div className="flex items-center gap-2">
                   <MapPin className="w-3.5 h-3.5 text-noc-cyan" />
-                  <span>Palace Grounds Epicentre: 13.0067° N, 77.5855° E (Influence Radius: 3.0 km)</span>
+                  <span>
+                    {activeEvent?.venue_name || justification?.locality || 'Palace Grounds'} Epicentre:{' '}
+                    {(activeEvent?.latitude ?? surgeTower?.lat ?? 13.0067).toFixed(4)}° N,{' '}
+                    {(activeEvent?.longitude ?? surgeTower?.lon ?? 77.5855).toFixed(4)}° E (Radius: 3.0 km)
+                  </span>
                 </div>
-                <span className="text-purple-300">Cells impacted: 12 cluster cells</span>
+                <span className="text-purple-300">
+                  Cells impacted: {telemetry.filter((t) => t.event_demand_mbps > 0 || t.cell_id === surgeTower?.cell_id).length} cluster cells
+                </span>
               </div>
             </div>
           </div>

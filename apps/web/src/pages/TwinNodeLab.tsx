@@ -45,7 +45,11 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
 
   useEffect(() => {
     loadTasks();
-    const interval = setInterval(loadTasks, 3000);
+    onRefreshNodes();
+    const interval = setInterval(() => {
+      loadTasks();
+      onRefreshNodes();
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -132,10 +136,12 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
               className={`px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border ${
                 tanishNode?.state === 'ACTIVE'
                   ? 'bg-emerald-950 border-emerald-600 text-emerald-300'
-                  : 'bg-cyan-950 border-cyan-600 text-cyan-300'
+                  : tanishNode?.state === 'STANDBY'
+                  ? 'bg-amber-950 border-amber-600 text-amber-300'
+                  : 'bg-slate-900 border-slate-700 text-slate-400'
               }`}
             >
-              {tanishNode?.state || 'ACTIVE'}
+              {tanishNode?.state || 'OFFLINE'}
             </span>
           </div>
 
@@ -173,9 +179,15 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
               <span>SIMULATED CELLULAR LOAD</span>
               <Badge type="SYNTHETIC" />
             </div>
-            <div className="text-xs font-mono bg-noc-card/40 p-2 rounded border border-noc-border text-slate-300 flex justify-between">
+            <div className="text-xs font-mono bg-noc-card/40 p-2 rounded border border-noc-border text-slate-300 flex justify-between items-center">
               <span>Assigned Cells: {tanishNode?.assigned_cell_ids?.length || 92} cells</span>
-              <span className="text-noc-cyan">Load: Normal</span>
+              <button
+                onClick={() => handleToggleState('NODE-TANISH', tanishNode?.state || 'STANDBY')}
+                disabled={!tanishNode}
+                className="px-2 py-0.5 bg-noc-surface hover:bg-noc-card border border-noc-border rounded text-[10px] font-mono text-noc-cyan disabled:opacity-40"
+              >
+                {tanishNode?.state === 'ACTIVE' ? 'Set Standby' : 'Activate Worker'}
+              </button>
             </div>
           </div>
 
@@ -284,6 +296,18 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
 
           <div className="flex items-center gap-2">
             <select
+              value={targetNodeId}
+              onChange={(e) => setTargetNodeId(e.target.value)}
+              className="bg-noc-card border border-noc-border rounded px-2.5 py-1 text-xs font-mono text-slate-200"
+            >
+              {(safeNodes.length > 0 ? safeNodes : [{ node_id: 'NODE-JUNAID' }, { node_id: 'NODE-TANISH' }]).map((n) => (
+                <option key={n.node_id} value={n.node_id}>
+                  {n.node_id}
+                </option>
+              ))}
+            </select>
+
+            <select
               value={selectedTaskType}
               onChange={(e) => setSelectedTaskType(e.target.value)}
               className="bg-noc-card border border-noc-border rounded px-2.5 py-1 text-xs font-mono text-slate-200"
@@ -299,7 +323,7 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
               className="px-3 py-1 bg-gradient-to-r from-noc-cyan to-noc-teal text-slate-950 font-bold font-mono text-xs rounded flex items-center gap-1.5 shadow transition disabled:opacity-40"
             >
               <Send className="w-3 h-3" />
-              <span>{isDispatching ? 'Dispatching...' : 'Dispatch to Junaid'}</span>
+              <span>{isDispatching ? 'Dispatching...' : `Dispatch to ${targetNodeId}`}</span>
             </button>
           </div>
         </div>
@@ -322,35 +346,41 @@ export const TwinNodeLab: React.FC<TwinNodeLabProps> = ({ nodes, onRefreshNodes 
               {tasks.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-6 text-center text-slate-500">
-                    No compute tasks dispatched yet. Click "Dispatch to Junaid" above.
+                    No compute tasks dispatched yet. Activate a node and click "Dispatch" above.
                   </td>
                 </tr>
               ) : (
-                tasks.slice(0, 8).map((task) => (
-                  <tr key={task.task_id} className="hover:bg-noc-card/50">
-                    <td className="py-2 font-bold text-slate-200">{task.task_id.substring(0, 8)}...</td>
-                    <td className="text-noc-cyan">{task.task_type}</td>
-                    <td className="text-slate-400">{task.origin_node_id}</td>
-                    <td className="text-purple-300">{task.assigned_node_id}</td>
-                    <td>
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          task.state === 'COMPLETED'
-                            ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/60'
-                            : task.state === 'RUNNING'
-                            ? 'bg-cyan-950 text-cyan-300 border border-cyan-700/60 animate-pulse'
-                            : 'bg-amber-950 text-amber-300 border border-amber-700/60'
-                        }`}
-                      >
-                        {task.state}
-                      </span>
-                    </td>
-                    <td>{task.duration_ms ? `${task.duration_ms.toFixed(0)} ms` : '—'}</td>
-                    <td className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]" title={task.result_sha256 || 'Pending'}>
-                      {task.result_sha256 ? `${task.result_sha256.substring(0, 12)}...` : 'Pending'}
-                    </td>
-                  </tr>
-                ))
+                tasks.slice(0, 8).map((task) => {
+                  const st = task.status || task.state;
+                  const receipt = task.checksum || task.result_sha256;
+                  return (
+                    <tr key={task.task_id} className="hover:bg-noc-card/50">
+                      <td className="py-2 font-bold text-slate-200">{task.task_id.substring(0, 8)}...</td>
+                      <td className="text-noc-cyan">{task.task_type}</td>
+                      <td className="text-slate-400">{task.origin_node_id}</td>
+                      <td className="text-purple-300">{task.assigned_node_id}</td>
+                      <td>
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            st === 'COMPLETED'
+                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-700/60'
+                              : st === 'RUNNING'
+                              ? 'bg-cyan-950 text-cyan-300 border border-cyan-700/60 animate-pulse'
+                              : st === 'FAILED' || st === 'REJECTED'
+                              ? 'bg-red-950 text-red-400 border border-red-700/60'
+                              : 'bg-amber-950 text-amber-300 border border-amber-700/60'
+                          }`}
+                        >
+                          {st}
+                        </span>
+                      </td>
+                      <td>{task.duration_ms != null ? `${task.duration_ms.toFixed(1)} ms` : '—'}</td>
+                      <td className="text-[10px] text-slate-400 font-mono truncate max-w-[140px]" title={receipt || 'Pending'}>
+                        {receipt ? `${receipt.substring(0, 16)}...` : 'Pending'}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

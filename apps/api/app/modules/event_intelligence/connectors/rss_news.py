@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 import feedparser
 import httpx
 from apps.api.app.core.database import utc_now
 from apps.api.app.modules.event_intelligence.connectors.base import EventSourceConnector, RawSourceItem
+from apps.api.app.modules.event_intelligence.relevance import score_crowd_relevance
 from apps.api.app.schemas.events import SourceHealthResult
 
 logger = logging.getLogger("neuralgrid.eventsense.connector.rss")
@@ -62,10 +64,14 @@ class RSSNewsConnector(EventSourceConnector):
         except Exception as exc:
             logger.debug(f"Direct HTTP fetch failed for {self.base_url}: {exc}")
 
-        # Feedparser parse
-        feed = feedparser.parse(content_text if content_text else self.base_url)
+        if not content_text:
+            return []
+
+        # Feedparser parse bounded to fetched XML text (never block on un-timeouted URL fetch)
+        feed = feedparser.parse(content_text)
         entries = feed.entries or []
 
+        scored_candidates: list[tuple[int, RawSourceItem]] = []
         for entry in entries:
             link = getattr(entry, "link", None)
             title = getattr(entry, "title", None)
@@ -73,12 +79,15 @@ class RSSNewsConnector(EventSourceConnector):
                 continue
 
             summary = getattr(entry, "summary", "") or getattr(entry, "description", "")
-            combo = f"{title} {summary}".lower()
-
-            # Filter relevant events or crowd gathering terms
-            if clean_terms:
-                if not any(term in combo for term in clean_terms) and "bengaluru" not in combo and "bangalore" not in combo:
-                    continue
+            domain = urlparse(link).netloc
+            rel = score_crowd_relevance(
+                title=title,
+                text=summary,
+                domain=domain,
+                source_type="news_article",
+            )
+            if not rel.is_relevant:
+                continue
 
             # Parse date
             pub_dt = None
@@ -89,21 +98,26 @@ class RSSNewsConnector(EventSourceConnector):
                 except Exception:
                     pub_dt = None
 
-            items.append(
-                RawSourceItem(
-                    url=link,
-                    title=title,
-                    snippet=summary[:400] if summary else None,
-                    source_type="news_article",
-                    published_at=pub_dt,
-                    raw_metadata={"feed_url": self.base_url},
+            scored_candidates.append(
+                (
+                    rel.score,
+                    RawSourceItem(
+                        url=link,
+                        title=title,
+                        snippet=summary[:400] if summary else None,
+                        source_type="news_article",
+                        published_at=pub_dt,
+                        raw_metadata={
+                            "feed_url": self.base_url,
+                            "crowd_relevance_score": rel.score,
+                            "crowd_category": rel.category,
+                        },
+                    ),
                 )
             )
 
-            if len(items) >= max_records:
-                break
-
-        return items
+        scored_candidates.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in scored_candidates[:max_records]]
 
     async def check_health(self) -> SourceHealthResult:
         try:

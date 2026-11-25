@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 from bs4 import BeautifulSoup
+from apps.api.app.modules.event_intelligence.relevance import score_crowd_relevance
 
 
 def extract_page_text_fallback(
@@ -58,7 +59,23 @@ def extract_page_text_fallback(
         ("Manyata", "Manyata Tech Park Amphitheatre", "Manyata Tech Park (Hebbal Outer Ring)", 13.0458, 77.6200),
         ("BIEC", "Bengaluru International Exhibition Centre", "Bengaluru International Exhibition Centre (NICE Grounds)", 13.0610, 77.4760),
         ("Phoenix Marketcity", "Phoenix Marketcity Whitefield", "Phoenix Marketcity (Mahadevapura / Whitefield Rd)", 12.9958, 77.6964),
+        ("Freedom Park", "Freedom Park", "Freedom Park (Gandhinagar Civic Rally Hub)", 12.9767, 77.5812),
+        ("Aero India", "Yelahanka Air Force Station", "Yelahanka Air Force Station (Aero India Hub)", 13.1356, 77.6061),
+        ("Yelahanka", "Yelahanka Air Force Station", "Yelahanka Air Force Station (North Bengaluru)", 13.1356, 77.6061),
+        ("Lalbagh", "Lalbagh Botanical Garden", "Lalbagh Botanical Garden (South Bengaluru)", 12.9507, 77.5848),
+        ("Cubbon Park", "Cubbon Park", "Cubbon Park (CBD Heritage Grounds)", 12.9763, 77.5929),
+        ("Science Gallery", "Science Gallery Bengaluru", "Science Gallery Bengaluru (Bellary Rd / Sanjaynagar)", 13.0306, 77.5892),
+        ("Echoes of Earth", "Echoes of Earth Sanctuary", "Echoes of Earth Festival Grounds (North Bengaluru)", 13.1120, 77.6100),
+        ("MG Road", "MG Road & Brigade Road Zone", "MG Road & Brigade Road CBD Promenade", 12.9756, 77.6066),
+        ("Brigade Road", "MG Road & Brigade Road Zone", "MG Road & Brigade Road CBD Promenade", 12.9756, 77.6066),
+        ("Jayamahal", "Jayamahal Palace Grounds", "Jayamahal Palace Grounds (Bengaluru Central)", 13.0012, 77.5955),
     ]
+
+    rel = score_crowd_relevance(event_name or title, markdown_text)
+    if rel.is_relevant:
+        fields["event_type"] = rel.category
+        provenance["event_type"] = f"crowd_relevance:{rel.category}"
+        evidence_parts.append(f"Crowd relevance: {rel.category} (score {rel.score}/100)")
 
     full_text = f"{title or ''}\n{markdown_text or ''}"
     venue_matched = False
@@ -85,7 +102,7 @@ def extract_page_text_fallback(
             if 500 <= val <= 250000:
                 fields["attendance_high"] = val
                 fields["attendance_low"] = int(val * 0.7)
-                fields["attendance_basis"] = "TEXT_MENTION"
+                fields["attendance_basis"] = "SOURCE_EVIDENCE"
                 provenance["attendance"] = f"text_pattern:{val}"
                 evidence_parts.append(f"Extracted attendance estimate from text: ~{val}")
         except Exception:

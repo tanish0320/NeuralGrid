@@ -195,22 +195,45 @@ class AllEventsConnector(EventSourceConnector):
                     soup = BeautifulSoup(resp.text, "html.parser")
                     cards = soup.find_all("div", class_=re.compile(r"event-card|item"))
                     now = utc_now()
-                    for c in cards[:max_records]:
+                    seen_urls: set[str] = set()
+
+                    def _add_candidate(raw_title: str, raw_href: str) -> None:
+                        clean_title = " ".join((raw_title or "").split()).strip()
+                        if not clean_title or len(clean_title) < 4 or not raw_href:
+                            return
+                        full_url = raw_href if raw_href.startswith("http") else f"https://allevents.in{raw_href}"
+                        canon = full_url.split("?")[0].split("#")[0]
+                        if canon in seen_urls:
+                            return
+                        seen_urls.add(canon)
+                        items.append(
+                            RawSourceItem(
+                                url=full_url,
+                                title=clean_title,
+                                snippet="Discovered via AllEvents.in Bangalore community portal.",
+                                source_type="ticketing_page",
+                                published_at=now,
+                            )
+                        )
+
+                    for c in cards:
                         a = c.find("a")
                         if not a:
                             continue
-                        title = a.get_text(separator=" ").strip()
-                        href = a.get("href", "")
-                        if title and href:
-                            items.append(
-                                RawSourceItem(
-                                    url=href if href.startswith("http") else f"https://allevents.in{href}",
-                                    title=title,
-                                    snippet="Discovered via AllEvents.in Bangalore community portal.",
-                                    source_type="ticketing_page",
-                                    published_at=now,
-                                )
-                            )
+                        _add_candidate(a.get_text(separator=" "), a.get("href", ""))
+                        if len(items) >= max_records:
+                            break
+
+                    # Also match real AllEvents event detail links with numeric IDs (skipping category pages)
+                    if len(items) < max_records:
+                        detail_links = soup.find_all(
+                            "a",
+                            href=re.compile(r"https?://allevents\.in/bangalore/[^/?#]+/\d{8,}"),
+                        )
+                        for a in detail_links:
+                            _add_candidate(a.get_text(separator=" "), a.get("href", ""))
+                            if len(items) >= max_records:
+                                break
         except Exception as exc:
             logger.debug(f"AllEvents notice: {exc}")
 

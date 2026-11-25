@@ -12,6 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from apps.api.app.core.database import utc_now
 from apps.api.app.core.state import AppContainer, get_container
 from apps.api.app.modules.dependency_graph.graph_builder import haversine_km
+from apps.api.app.modules.event_intelligence.relevance import (
+    estimate_crowd_attendance,
+    score_crowd_relevance,
+)
 from apps.api.app.schemas.events import (
     CanonicalEventDetailResponse,
     CrawlRequest,
@@ -63,34 +67,66 @@ async def realtime_scan(
     container: AppContainer = Depends(get_container),
 ) -> RealtimeScanResponse:
     """Execute live real-time web scraping scan across Bengaluru RSS feeds and predict cellular surge."""
-    # 1. Discover live RSS candidates
-    disc_req = EventDiscoveryRequest(
-        city=request.city,
-        query_terms=request.query_terms,
-        enabled_providers=["rss"],
-        max_candidates=5,
-    )
-    discovery = await container.event_orchestrator.run_discovery(disc_req)
-    
-    # 2. Crawl and extract events
+    discovery = None
     events: list[EventRecord] = []
-    if discovery.source_ids:
-        crawl_req = CrawlRequest(run_id=discovery.run_id, source_ids=discovery.source_ids[:5])
-        crawl_res = await container.event_orchestrator.run_crawl(crawl_req)
-        for eid in crawl_res.event_ids:
-            ev = container.event_repo.get_event(eid)
-            if ev is not None:
-                if request.auto_confirm and ev.status != "CONFIRMED":
-                    ev = ev.model_copy(update={"status": "CONFIRMED", "verification_status": "MANUALLY_VERIFIED"})
-                    container.event_repo.update_event(ev)
-                events.append(ev)
 
-    # Fallback to existing confirmed events if external network returns 0
+    # Fast read-only path for dashboard mount previews when events are already persisted
+    existing_events = container.event_repo.list_events()
+    if request.auto_confirm or not existing_events:
+        # 1. Discover live RSS, ticketing & GDELT candidates
+        disc_req = EventDiscoveryRequest(
+            city=request.city,
+            query_terms=request.query_terms,
+            enabled_providers=["rss", "allevents", "gdelt"],
+            max_candidates=5,
+        )
+        discovery = await container.event_orchestrator.run_discovery(disc_req)
+
+        # 2. Crawl highest-scored relevant (NOT_FETCHED) sources and extract events (capped at 3 for speed)
+        if discovery.source_ids:
+            scored_sources = []
+            for src in container.source_repo.list_sources(run_id=discovery.run_id):
+                if src.fetch_status != "NOT_FETCHED":
+                    continue
+                rel = score_crowd_relevance(src.title, src.snippet, src.domain, src.source_type)
+                if rel.is_relevant:
+                    scored_sources.append((rel.score, src.source_id))
+            scored_sources.sort(key=lambda item: item[0], reverse=True)
+            eligible_source_ids = [sid for _, sid in scored_sources[:3]]
+            if eligible_source_ids:
+                crawl_req = CrawlRequest(run_id=discovery.run_id, source_ids=eligible_source_ids)
+                crawl_res = await container.event_orchestrator.run_crawl(crawl_req)
+                for eid in crawl_res.event_ids:
+                    ev = container.event_repo.get_event(eid)
+                    if ev is not None:
+                        if request.auto_confirm and ev.status != "CONFIRMED":
+                            ev = ev.model_copy(update={"status": "CONFIRMED", "verification_status": "MANUALLY_VERIFIED"})
+                            container.event_repo.update_event(ev)
+                        events.append(ev)
+
+    def _event_rank_key(ev: EventRecord) -> tuple[int, int]:
+        rel = score_crowd_relevance(ev.name, ev.venue_name, None, None)
+        return (rel.score, estimate_crowd_attendance(ev))
+
+    # Filter & rank discovered events; fall back to persisted crowd/demo events when empty
+    if events:
+        relevant_crawled = [
+            e
+            for e in events
+            if e.event_origin == "SEEDED_DEMO" or score_crowd_relevance(e.name, e.venue_name, None, None).is_relevant
+        ]
+        events = sorted(relevant_crawled, key=_event_rank_key, reverse=True)
+
     if not events:
-        all_evs = container.event_repo.list_events()
-        events = [e for e in all_evs if e.status == "CONFIRMED" or e.latitude is not None][:5]
-        if not events and all_evs:
-            events = all_evs[:5]
+        all_evs = existing_events or container.event_repo.list_events()
+        eligible_evs = [
+            e
+            for e in all_evs
+            if e.event_origin == "SEEDED_DEMO" or score_crowd_relevance(e.name, e.venue_name, None, None).is_relevant
+        ]
+        eligible_evs.sort(key=_event_rank_key, reverse=True)
+        confirmed_or_geo = [e for e in eligible_evs if e.status == "CONFIRMED" or e.latitude is not None]
+        events = (confirmed_or_geo or eligible_evs)[:5]
 
     selected_event = events[0] if events else None
     if selected_event and (request.auto_confirm or selected_event.status != "CONFIRMED"):
@@ -114,7 +150,7 @@ async def realtime_scan(
     if not active_sim:
         try:
             from apps.api.app.schemas.simulations import SimulationCreateRequest
-            new_sim = await container.sim_manager.create_simulation(SimulationCreateRequest(seed=42))
+            new_sim = container.sim_manager.create_simulation(SimulationCreateRequest(seed=42))
             active_sim = container.sim_repo.get_run(new_sim.simulation_id)
         except Exception as e:
             logger.warning(f"Could not auto-create simulation: {e}")
@@ -143,7 +179,8 @@ async def realtime_scan(
         dist_to_venue = round(haversine_km(ev_lat, ev_lon, surge_cell.lat, surge_cell.lon), 2)
 
         # Traffic metrics
-        eff_att = float(selected_event.attendance_high or 32000)
+        eff_att = float(estimate_crowd_attendance(selected_event))
+        selected_rel = score_crowd_relevance(selected_event.name, selected_event.venue_name, None, None)
         surge_uplift_mbps = round((eff_att / 100.0) * 1.55, 1)
         base_load_mbps = round(surge_cell.base_load_mbps, 1)
         cap_mbps = round(surge_cell.capacity_mbps, 1)
@@ -233,8 +270,14 @@ async def realtime_scan(
         source_name = source_rec.domain if source_rec else "news.google.com"
         source_url = str(source_rec.url) if source_rec else "https://news.google.com"
 
-        # Inject real-time event into active simulation and generate mitigation plan
-        if active_sim and selected_event:
+        # Inject real-time event into active simulation only when auto_confirm is requested
+        # and the selected event is not already the active event on this simulation.
+        if (
+            active_sim
+            and selected_event
+            and request.auto_confirm
+            and active_sim.active_event_id != selected_event.event_id
+        ):
             try:
                 from apps.api.app.schemas.simulations import SimulationEventInjectRequest
                 from apps.api.app.schemas.plans import PlanGenerateRequest, OperatorIntent, PlanConstraints
@@ -284,6 +327,8 @@ async def realtime_scan(
         justification = {
             "locality": locality_name,
             "spike_reason": selected_event.name,
+            "crowd_category": selected_rel.category,
+            "relevance_signals": selected_rel.matched_signals,
             "event_window": "Today 18:30 – 22:30 IST (Simulated 4h Surge Horizon)",
             "estimated_attendees": int(eff_att),
             "source_citation": f"{source_name.upper()} (Real-time RSS Feed)",
@@ -307,7 +352,7 @@ async def realtime_scan(
 
     return RealtimeScanResponse(
         status="SUCCEEDED",
-        discovered_sources_count=len(discovery.source_ids),
+        discovered_sources_count=len(discovery.source_ids) if discovery else len(container.source_repo.list_sources()),
         events=events,
         selected_event=selected_event,
         surge_tower=surge_tower,
